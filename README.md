@@ -1,57 +1,59 @@
-# DocDeck - PDF 工具箱 🧰
+# DocDeck - 专业的 PDF 批处理工具 🧰
 
-**DocDeck** 是一款强大且易于使用的桌面应用程序，专为批量处理 PDF 文件而设计。它可以轻松地为 PDF 添加页眉页脚、合并多个文件，并能移除密码限制。
+**DocDeck** 是一款功能丰富且操作直观的跨平台桌面应用，专为高效批量处理 PDF 文件而打造。它支持添加页眉页脚、合并文档、解除加密限制，并兼具命令行自动化能力。
 
-【截图暂空】
+<!-- TODO: 添加应用界面截图 -->
 
-## ✨ 主要功能
+## ✨ 主要功能亮点
 
-- **批量添加页眉/页脚:**
-  - 支持三种模式：文件名、自动编号、自定义文本。
-  - 完全自定义字体、字号、颜色和精确位置 (X/Y 坐标)。
-  - 实时预览页眉位置。
-- **智能字体推荐:** 自动扫描 PDF 内容，推荐文档中可能使用的字体。
-- **PDF 合并:** 处理完成后，可选择将多个 PDF 合并为一个文件，并支持拖拽排序。
-- **PDF 解锁:** 移除 PDF 的打开密码或权限密码。
-- **跨平台:** 可在 Windows, macOS 和 Linux 上运行。
-- **命令行支持:** 支持通过命令行进行自动化批量处理。
+- **批量添加页眉/页脚**
+  - 三种模式：文件名 / 自动编号 / 自定义文本
+  - 支持字体、字号、颜色、位置 (X/Y 坐标) 全面自定义
+  - 实时可视化预览页眉位置
+
+- **智能字体推荐**
+  - 自动扫描 PDF 内容，提取并推荐原始字体风格
+
+- **PDF 合并**
+  - 支持拖拽排序和合并预览
+  - 可选添加页码，样式灵活自定义
+
+- **PDF 解锁**
+  - 支持移除打开密码与权限限制，兼容加密文档
+
+- **跨平台支持**
+  - 支持 **Windows、macOS、Linux**
+
+- **命令行批处理**
+  - 适用于自动化脚本及集成流程
 
 ## 🚀 安装与使用
 
-**(这里将在下一步“发布 Release”后填写)**
+稍后将提供 [Releases 页面](https://github.com/muxiaoxiii/DocDeck/releases) 下载链接（包含 Windows/macOS/Linux 打包版本）。
 
-通常你会在这里提供指向 **Releases** 页面的下载链接。
+## 🛠️ 开发者指南
 
-## 🛠️ 为开发者 (Development Setup)
+如需从源码运行或参与贡献，请按以下步骤操作：
 
-如果你想从源码运行或贡献代码，请按以下步骤操作：
+```bash
+# 克隆项目
+git clone https://github.com/muxiaoxiii/DocDeck.git
+cd DocDeck
 
-1.  克隆仓库:
-    ```bash
-    git clone [https://github.com/YourUsername/DocDeck.git](https://github.com/YourUsername/DocDeck.git)
-    cd DocDeck
-    ```
+# 创建虚拟环境（推荐）
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
 
-2.  创建并激活虚拟环境 (推荐):
-    ```bash
-    python -m venv venv
-    # Windows
-    venv\Scripts\activate
-    # macOS/Linux
-    source venv/bin/activate
-    ```
+# 安装依赖
+pip install -r requirements.txt
 
-3.  安装依赖:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  运行程序:
-    ```bash
-    python main.py
-    ```
-
-
+# 运行程序
+python main.py
+```
 
 ---
+
 *Created with ❤️ by [muxiaoxi](https://github.com/muxiaoxiii/)*
