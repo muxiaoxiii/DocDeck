@@ -39,6 +39,8 @@ jobs:
 
       - name: Create .dmg installer
         run: |
+          if [ ! -d "dist/DocDeck.app" ]; then echo "Error: DocDeck.app not found!"; exit 1; fi
+          # 【已修正】交换了最后两个参数的顺序
           create-dmg \
             --volname "DocDeck Installer" \
             --window-pos 200 120 \
@@ -47,8 +49,8 @@ jobs:
             --icon "DocDeck.app" 150 150 \
             --hide-extension "DocDeck.app" \
             --app-drop-link 450 150 \
-            "dist/DocDeck.app" \
-            "dist/DocDeck-macOS-${{ github.ref_name }}.dmg"
+            "dist/DocDeck-macOS-${{ github.ref_name }}.dmg" \
+            "dist/DocDeck.app"
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
@@ -56,6 +58,7 @@ jobs:
           name: DocDeck-macOS-dmg
           path: "dist/DocDeck-macOS-${{ github.ref_name }}.dmg"
 
+  # --- windows, linux, and release jobs remain the same ---
   build-windows:
     runs-on: windows-latest
     steps:
