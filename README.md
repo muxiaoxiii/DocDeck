@@ -51,9 +51,7 @@
     python main.py
     ```
 
-## 📜 许可证 (License)
 
-本项目采用 [MIT License](LICENSE) 授权。
 
 ---
-*Created with ❤️ by [muxiaoxi](https://github.com/YourUsername)*
+*Created with ❤️ by [muxiaoxi](https://github.com/muxiaoxiii/)*
