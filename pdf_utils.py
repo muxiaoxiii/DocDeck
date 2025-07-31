@@ -88,7 +88,8 @@ def get_pdf_fonts(path: str) -> list[str]:
         resources = page.get("/Resources", {})
         if "/Font" in resources:
             font_dict = resources["/Font"]
-            fonts = list(font_dict.keys())
+            if hasattr(font_dict, "keys"):
+                fonts = list(font_dict.keys())
     except (FileNotFoundError, PdfReadError) as e:
         logger.warning(f"[Fonts] Failed to read {path}: {e}")
     except Exception as e:
@@ -112,6 +113,7 @@ def register_font_safely(font_name: str) -> bool:
         bool: True if registration succeeded or already registered, False otherwise.
     """
     if font_name in pdfmetrics.getRegisteredFontNames():
+        logger.debug(f"[Font] '{font_name}' already registered.")
         return True
     try:
         font_prop = FontProperties(family=font_name)

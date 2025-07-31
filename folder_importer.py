@@ -1,4 +1,8 @@
 import os
+import logging
+
+# Ensure logging is configured at INFO level if not already set
+logging.basicConfig(level=logging.INFO)
 
 def import_from_folder(folder_path, include_hidden=False, sort_by_mtime=False):
     """
@@ -21,6 +25,7 @@ def import_from_folder(folder_path, include_hidden=False, sort_by_mtime=False):
     if sort_by_mtime:
         pdf_files.sort(key=lambda x: os.path.getmtime(x))
 
+    logging.info(f"Found {len(pdf_files)} PDF files in '{folder_path}'")
     return pdf_files
 
 def filter_pdf_files(paths, include_hidden=False, sort_by_mtime=False):
@@ -42,4 +47,5 @@ def filter_pdf_files(paths, include_hidden=False, sort_by_mtime=False):
     if sort_by_mtime:
         all_pdfs.sort(key=lambda x: os.path.getmtime(x))
 
+    logging.info(f"Filtered {len(all_pdfs)} PDF files from input paths: {paths}")
     return all_pdfs
