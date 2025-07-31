@@ -47,8 +47,8 @@ jobs:
             --icon "DocDeck.app" 150 150 \
             --hide-extension "DocDeck.app" \
             --app-drop-link 450 150 \
-            "dist/DocDeck-macOS-${{ github.ref_name }}.dmg" \
-            "dist/DocDeck.app"
+            "dist/DocDeck.app" \
+            "dist/DocDeck-macOS-${{ github.ref_name }}.dmg"
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
