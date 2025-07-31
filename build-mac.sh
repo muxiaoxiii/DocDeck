@@ -22,6 +22,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller create-dmg
 
+      - name: Convert PNG to ICNS
+        run: |
+          mkdir -p icon.iconset
+          sips -z 16 16     icon/docdeck.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     icon/docdeck.png --out icon.iconset/icon_32x32.png
+          sips -z 128 128   icon/docdeck.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   icon/docdeck.png --out icon.iconset/icon_256x256.png
+          iconutil -c icns icon.iconset -o icon/docdeck.icns
+          rm -r icon.iconset
+
       - name: Run macOS build script
         run: ./build-mac.sh
 

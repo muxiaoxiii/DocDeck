@@ -5,7 +5,7 @@ import os
 from PySide6.QtWidgets import QApplication
 from ui_main import MainWindow
 from logger import logger
-from controller import Controller
+from controller import ProcessingController
 
 def main():
     parser = argparse.ArgumentParser(description="DocDeck PDF Processor")
@@ -15,7 +15,7 @@ def main():
 
     if args.source and args.output:
         logger.info("命令行批量处理启动")
-        controller = Controller(None)  # no GUI
+        controller = ProcessingController(None)  # no GUI
         controller.handle_cli_batch_process(args.source, args.output)
         logger.info("批处理完成")
         sys.exit(0)

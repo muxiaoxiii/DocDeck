@@ -1,620 +1,603 @@
 # ui_main.py
+import os
+import pathlib
+from typing import Dict, Any
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QFileDialog, QMessageBox, QTableWidget,
-    QTableWidgetItem, QLabel, QHBoxLayout, QHeaderView, QComboBox, QSpinBox, QCheckBox
+    QTableWidgetItem, QLabel, QHBoxLayout, QHeaderView, QComboBox, QSpinBox, QCheckBox,
+    QGroupBox, QGridLayout, QLineEdit, QMenu, QInputDialog
 )
-from PySide6.QtCore import Qt, QCoreApplication
-from PySide6.QtGui import QPainter, QPen, QFont
+from PySide6.QtCore import Qt, QCoreApplication, QThread, QTimer
+from PySide6.QtGui import QPainter, QPen, QFont, QPixmap
 
-from PySide6.QtCore import QThread
-from controller import ProcessingController
-from controller import Worker  # 导入 Worker 类
-
-from logger import logger
+from controller import ProcessingController, Worker
 from font_manager import get_system_fonts
-from models import PDFFileItem
-from pdf_handler import merge_pdfs
-from file_namer import resolve_output_filename
-from position_utils import estimate_text_width, get_aligned_x_position, suggest_safe_header_y
+from pdf_handler import merge_pdfs, add_page_numbers
+from position_utils import suggest_safe_header_y, is_out_of_print_safe_area
 from merge_dialog import MergeDialog
-from page_number_adder import add_page_numbers
-import os
-import platform
+from logger import logger
 
-def _(text):
+def _(text: str) -> str:
+    """为国际化提供翻译函数"""
     return QCoreApplication.translate("MainWindow", text)
 
 class MainWindow(QMainWindow):
     """
-    The main application window. Handles UI layout and delegates logic to the controller.
-    Provides interface for importing PDFs, previewing and applying headers/footers, 
-    and triggering PDF processing and merging.
+    应用程序主窗口。
+    - 处理UI布局和用户交互。
+    - 将业务逻辑委托给ProcessingController。
+    - 提供PDF导入、设置页眉页脚、预览和触发处理的功能。
     """
+    MODE_FILENAME = "filename"
+    MODE_AUTO_NUMBER = "auto_number"
+    MODE_CUSTOM = "custom"
+
     def __init__(self):
         super().__init__()
-        # Future: Replace tight coupling with signal-slot mechanism if needed
+        self._font_linked_once = False
+        self.mode = self.MODE_FILENAME
+        self.file_items = []
+        self.settings_map: Dict[str, QWidget] = {}
+
         self.setWindowTitle("DocDeck - PDF Header & Footer Tool")
-        self.resize(1000, 600)
-        self._setup_ui()
-        # 添加菜单栏“帮助” -> “关于”
-        menubar = self.menuBar()
-        help_menu = menubar.addMenu(_("Help"))
-        about_action = help_menu.addAction(_("About"))
-        about_action.triggered.connect(self.show_about_dialog)
-        self.setAcceptDrops(True)
+        self.resize(1100, 850)
         self.controller = ProcessingController(self)
-        # 加载上次配置并应用设置
-        from config import load_settings, apply_defaults
+        
+        self._setup_ui()
+        self._setup_menu()
+        self._map_settings_to_widgets()
+        self._connect_signals()
+
+        self.setAcceptDrops(True)
+        from config import load_settings
         self._apply_settings(load_settings())
+        self._update_ui_state()
 
+    # --- UI Setup Methods ---
     def _setup_ui(self):
-        central = QWidget()
-        layout = QVBoxLayout()
-        header = QLabel(_("Import PDF Files"))
-        header.setStyleSheet("font-size: 18px; font-weight: bold; margin: 8px 0;")
+        """初始化和布局所有UI控件"""
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
 
-        self.import_button = QPushButton(_("Select Files or Folders"))
-        self.import_button.clicked.connect(self.import_files)
+        top_layout = self._create_top_bar()
+        self.auto_number_group = self._create_auto_number_group()
+        settings_group = self._create_settings_grid_group()
+        table_layout = self._create_table_area()
+        output_layout = self._create_output_layout()
 
-        mode_layout = QHBoxLayout()
-        self.mode_label = QLabel(_("Header Mode:"))
+        main_layout.addLayout(top_layout)
+        main_layout.addWidget(self.auto_number_group)
+        main_layout.addWidget(settings_group)
+        main_layout.addLayout(table_layout)
+        main_layout.addLayout(output_layout)
+        
+        self.setCentralWidget(central_widget)
+
+    def _create_top_bar(self) -> QHBoxLayout:
+        """创建顶部包含导入、清空和模式选择的工具栏"""
+        layout = QHBoxLayout()
+        self.import_button = QPushButton(_("Import Files or Folders"))
+        self.clear_button = QPushButton(_("Clear List"))
+        mode_label = QLabel(_("Header Mode:"))
         self.mode_select_combo = QComboBox()
         self.mode_select_combo.addItems([_("Filename Mode"), _("Auto Number Mode"), _("Custom Mode")])
-        self.mode_select_combo.currentIndexChanged.connect(self.header_mode_changed)
-        mode_layout.addWidget(self.mode_label)
-        mode_layout.addWidget(self.mode_select_combo)
-        layout.addWidget(header)
-        layout.addWidget(self.import_button)
-        layout.addLayout(mode_layout)
+        layout.addWidget(self.import_button); layout.addWidget(self.clear_button)
+        layout.addStretch(); layout.addWidget(mode_label); layout.addWidget(self.mode_select_combo)
+        return layout
 
-        # Dynamically populate font select with system fonts
-        self.font_select = QComboBox()
-        self.font_select.clear()
-        self.font_select.addItems(get_system_fonts())
-
-        # Auto-numbering controls
-        from PySide6.QtWidgets import QGroupBox, QLineEdit
-        self.auto_number_group = QGroupBox(_("Auto Number Settings"))
-        auto_layout = QHBoxLayout()
+    def _create_auto_number_group(self) -> QGroupBox:
+        """创建自动编号设置的控件组"""
+        group = QGroupBox(_("Auto Number Settings"))
+        layout = QHBoxLayout()
         self.prefix_input = QLineEdit("Doc-")
-        self.start_spin = QSpinBox()
-        self.start_spin.setRange(1, 9999)
-        self.start_spin.setValue(1)
-        self.step_spin = QSpinBox()
-        self.step_spin.setRange(1, 100)
-        self.step_spin.setValue(1)
+        self.start_spin = QSpinBox(); self.start_spin.setRange(1, 9999); self.start_spin.setValue(1)
+        self.step_spin = QSpinBox(); self.step_spin.setRange(1, 100); self.step_spin.setValue(1)
+        self.digits_spin = QSpinBox(); self.digits_spin.setRange(1, 6); self.digits_spin.setValue(3)
         self.suffix_input = QLineEdit("")
-        auto_layout.addWidget(QLabel(_("Prefix:")))
-        auto_layout.addWidget(self.prefix_input)
-        auto_layout.addWidget(QLabel(_("Start #:")))
-        auto_layout.addWidget(self.start_spin)
-        auto_layout.addWidget(QLabel(_("Step:")))
-        auto_layout.addWidget(self.step_spin)
-        auto_layout.addWidget(QLabel(_("Suffix:")))
-        auto_layout.addWidget(self.suffix_input)
-        self.auto_number_group.setLayout(auto_layout)
-        self.auto_number_group.setVisible(False)
-        layout.addWidget(self.auto_number_group)
+        
+        layout.addWidget(QLabel(_("Prefix:"))); layout.addWidget(self.prefix_input)
+        layout.addWidget(QLabel(_("Start #:"))); layout.addWidget(self.start_spin)
+        layout.addWidget(QLabel(_("Step:"))); layout.addWidget(self.step_spin)
+        layout.addWidget(QLabel(_("Digits:"))); layout.addWidget(self.digits_spin)
+        layout.addWidget(QLabel(_("Suffix:"))); layout.addWidget(self.suffix_input)
+        group.setLayout(layout)
+        group.setVisible(False)
+        return group
 
-        # Connect auto-numbering inputs to header update
-        self.prefix_input.textChanged.connect(lambda: self.update_header_texts(mode=self.mode))
-        self.start_spin.valueChanged.connect(lambda: self.update_header_texts(mode=self.mode))
-        self.step_spin.valueChanged.connect(lambda: self.update_header_texts(mode=self.mode))
-        self.suffix_input.textChanged.connect(lambda: self.update_header_texts(mode=self.mode))
+    def _create_settings_grid_group(self) -> QGroupBox:
+        """创建页眉页脚的网格布局设置控件组"""
+        group = QGroupBox(_("Header & Footer Settings"))
+        grid = QGridLayout()
+        grid.setColumnStretch(1, 1); grid.setColumnStretch(2, 1); grid.setColumnStretch(3, 1)
 
-        # Header settings
-        settings_layout = QHBoxLayout()
-
-        self.font_label = QLabel(_("Font:"))
-        # self.font_select already created above and filled
-
-        self.font_size_label = QLabel(_("Size:"))
-        self.font_size_spin = QSpinBox()
-        self.font_size_spin.setRange(6, 72)
-        self.font_size_spin.setValue(9)
-
-        self.x_label = QLabel(_("X Position:"))
-        self.x_input = QSpinBox()
-        self.x_input.setRange(0, 1000)
-        self.x_input.setValue(72)
-
-        self.y_label = QLabel(_("Y Position:"))
-        self.y_input = QSpinBox()
-        self.y_input.setRange(0, 1000)
-        self.y_input.setValue(suggest_safe_header_y())
-
-        self.header_y_warning_label = QLabel("⚠️")
-        self.header_y_warning_label.setToolTip(_("This position is too close to the edge and may not print correctly."))
-        self.header_y_warning_label.setVisible(False)
-
-        self.left_btn = QPushButton(_("Left"))
-        self.center_btn = QPushButton(_("Center"))
-        self.right_btn = QPushButton(_("Right"))
-        self.left_btn.clicked.connect(lambda: self.update_alignment("left"))
-        self.center_btn.clicked.connect(lambda: self.update_alignment("center"))
-        self.right_btn.clicked.connect(lambda: self.update_alignment("right"))
-
-        settings_layout.addWidget(self.font_label)
-        settings_layout.addWidget(self.font_select)
-        settings_layout.addWidget(self.font_size_label)
-        settings_layout.addWidget(self.font_size_spin)
-        settings_layout.addWidget(self.x_label)
-        settings_layout.addWidget(self.x_input)
-        settings_layout.addWidget(self.y_label)
-        settings_layout.addWidget(self.y_input)
-        settings_layout.addWidget(self.header_y_warning_label)
-        settings_layout.addWidget(self.left_btn)
-        settings_layout.addWidget(self.center_btn)
-        settings_layout.addWidget(self.right_btn)
-        layout.addLayout(settings_layout)
-
-        # Footer settings (expanded to mirror header controls)
-        footer_settings_layout = QHBoxLayout()
-        self.footer_y_label = QLabel(_("Footer Y:"))
-        self.footer_y_input = QSpinBox()
-        self.footer_y_input.setRange(0, 1000)
-        self.footer_y_input.setValue(40)
-        self.footer_y_warning_label = QLabel("⚠️")
-        self.footer_y_warning_label.setToolTip(_("This position is too close to the edge and may not print correctly."))
-        self.footer_y_warning_label.setVisible(False)
-        footer_settings_layout.addWidget(self.footer_y_label)
-        footer_settings_layout.addWidget(self.footer_y_input)
-        footer_settings_layout.addWidget(self.footer_y_warning_label)
-        # Expanded footer controls
-        self.footer_font_label = QLabel(_("Font:"))
-        self.footer_font_select = QComboBox()
-        self.footer_font_select.addItems(get_system_fonts())
-
-        self.footer_font_size_label = QLabel(_("Size:"))
-        self.footer_font_size_spin = QSpinBox()
-        self.footer_font_size_spin.setRange(6, 72)
-        self.footer_font_size_spin.setValue(9)
-
-        self.footer_x_label = QLabel(_("X Position:"))
-        self.footer_x_input = QSpinBox()
-        self.footer_x_input.setRange(0, 1000)
-        self.footer_x_input.setValue(72)
-
-        self.footer_left_btn = QPushButton(_("Left"))
-        self.footer_center_btn = QPushButton(_("Center"))
-        self.footer_right_btn = QPushButton(_("Right"))
-        self.footer_left_btn.clicked.connect(lambda: self.update_footer_alignment("left"))
-        self.footer_center_btn.clicked.connect(lambda: self.update_footer_alignment("center"))
-        self.footer_right_btn.clicked.connect(lambda: self.update_footer_alignment("right"))
-
-        footer_settings_layout.addWidget(self.footer_font_label)
-        footer_settings_layout.addWidget(self.footer_font_select)
-        footer_settings_layout.addWidget(self.footer_font_size_label)
-        footer_settings_layout.addWidget(self.footer_font_size_spin)
-        footer_settings_layout.addWidget(self.footer_x_label)
-        footer_settings_layout.addWidget(self.footer_x_input)
-        footer_settings_layout.addWidget(self.footer_left_btn)
-        footer_settings_layout.addWidget(self.footer_center_btn)
-        footer_settings_layout.addWidget(self.footer_right_btn)
-        layout.addLayout(footer_settings_layout)
-
-        # Preview canvas
-        self.preview_label = QLabel(_("Header Position Preview"))
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.preview_label)
-
-        self.preview_canvas = QLabel()
-        self.preview_canvas.setFixedSize(420, 595)  # scaled A4
+        preview_label = QLabel(_("Position Preview")); preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(210, 60)
         self.preview_canvas.setStyleSheet("background: white; border: 1px solid #ccc;")
-        layout.addWidget(self.preview_canvas, alignment=Qt.AlignCenter)
-        self.update_preview()
+        preview_vbox = QVBoxLayout(); preview_vbox.addWidget(preview_label); preview_vbox.addWidget(self.preview_canvas, 0, Qt.AlignCenter)
+        grid.addLayout(preview_vbox, 0, 3, 6, 1)
 
-        self.file_table = QTableWidget(0, 13)
-        self.file_table.setHorizontalHeaderLabels([
-            _("No."), _("Filename"), _("Size (MB)"), _("Page Count"), _("Header Text"),
-            _("Header Font"), _("Header Size"), _("Header X"), _("Header Y"),
-            _("Footer Font"), _("Footer Size"), _("Footer Y"), _("Footer X")
-        ])
+        grid.addWidget(QLabel("<b>" + _("Settings") + "</b>"), 0, 0, Qt.AlignRight)
+        grid.addWidget(QLabel("<b>" + _("Header") + "</b>"), 0, 1, Qt.AlignCenter)
+        grid.addWidget(QLabel("<b>" + _("Footer") + "</b>"), 0, 2, Qt.AlignCenter)
+        
+        self.font_select = QComboBox(); self.font_select.addItems(get_system_fonts())
+        self.footer_font_select = QComboBox(); self.footer_font_select.addItems(get_system_fonts())
+        self.font_size_spin = QSpinBox(); self.font_size_spin.setRange(6, 72); self.font_size_spin.setValue(9)
+        self.footer_font_size_spin = QSpinBox(); self.footer_font_size_spin.setRange(6, 72); self.footer_font_size_spin.setValue(9)
+        grid.addWidget(QLabel(_("Font:")), 1, 0, Qt.AlignRight); grid.addWidget(self.font_select, 1, 1); grid.addWidget(self.footer_font_select, 1, 2)
+        grid.addWidget(QLabel(_("Size:")), 2, 0, Qt.AlignRight); grid.addWidget(self.font_size_spin, 2, 1); grid.addWidget(self.footer_font_size_spin, 2, 2)
+        
+        self.x_input = QSpinBox(); self.x_input.setRange(0, 1000); self.x_input.setValue(72)
+        self.footer_x_input = QSpinBox(); self.footer_x_input.setRange(0, 1000); self.footer_x_input.setValue(72)
+        self.y_input = QSpinBox(); self.y_input.setRange(0, 1000); self.y_input.setValue(suggest_safe_header_y())
+        self.header_y_warning_label = self._create_warning_label()
+        header_y_layout = QHBoxLayout(); header_y_layout.addWidget(self.y_input); header_y_layout.addWidget(self.header_y_warning_label)
+        self.footer_y_input = QSpinBox(); self.footer_y_input.setRange(0, 1000); self.footer_y_input.setValue(40)
+        self.footer_y_warning_label = self._create_warning_label()
+        footer_y_layout = QHBoxLayout(); footer_y_layout.addWidget(self.footer_y_input); footer_y_layout.addWidget(self.footer_y_warning_label)
+        grid.addWidget(QLabel(_("X Position:")), 3, 0, Qt.AlignRight); grid.addWidget(self.x_input, 3, 1); grid.addWidget(self.footer_x_input, 3, 2)
+        grid.addWidget(QLabel(_("Y Position:")), 4, 0, Qt.AlignRight); grid.addLayout(header_y_layout, 4, 1); grid.addLayout(footer_y_layout, 4, 2)
+
+        self.left_btn = QPushButton(_("Left")); self.center_btn = QPushButton(_("Center")); self.right_btn = QPushButton(_("Right"))
+        header_align_layout = QHBoxLayout(); header_align_layout.addWidget(self.left_btn); header_align_layout.addWidget(self.center_btn); header_align_layout.addWidget(self.right_btn)
+        self.footer_left_btn = QPushButton(_("Left")); self.footer_center_btn = QPushButton(_("Center")); self.footer_right_btn = QPushButton(_("Right"))
+        footer_align_layout = QHBoxLayout(); footer_align_layout.addWidget(self.footer_left_btn); footer_align_layout.addWidget(self.footer_center_btn); footer_align_layout.addWidget(self.footer_right_btn)
+        grid.addWidget(QLabel(_("Alignment:")), 5, 0, Qt.AlignRight); grid.addLayout(header_align_layout, 5, 1); grid.addLayout(footer_align_layout, 5, 2)
+
+        grid.addWidget(QLabel(_("Global Footer Text:")), 6, 0, Qt.AlignRight)
+        self.global_footer_text = QLineEdit(_("Page {page} of {total}"))
+        self.global_footer_text.setToolTip(_("Use {page} for current page, {total} for total pages."))
+        self.apply_footer_template_button = QPushButton(_("Apply to All"))
+        footer_template_layout = QHBoxLayout(); footer_template_layout.addWidget(self.global_footer_text); footer_template_layout.addWidget(self.apply_footer_template_button)
+        grid.addLayout(footer_template_layout, 6, 1, 1, 2)
+
+        group.setLayout(grid)
+        return group
+
+    def _create_table_area(self) -> QHBoxLayout:
+        """创建文件列表及右侧的控制按钮"""
+        layout = QHBoxLayout()
+        self.file_table = QTableWidget(0, 6)
+        self.file_table.setHorizontalHeaderLabels([_("No."), _("Filename"), _("Size (MB)"), _("Page Count"), _("Header Text"), _("Footer Text")])
         self.file_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.file_table.setEditTriggers(QTableWidget.DoubleClicked)
-
-        layout.addWidget(self.file_table)
-
-        # 右键菜单绑定
-        from PySide6.QtCore import Qt
         self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.file_table.customContextMenuRequested.connect(self._show_context_menu)
+        
+        controls_layout = QVBoxLayout()
+        self.move_up_button = QPushButton(_("Move Up"))
+        self.move_down_button = QPushButton(_("Move Down"))
+        controls_layout.addStretch(); controls_layout.addWidget(self.move_up_button); controls_layout.addWidget(self.move_down_button); controls_layout.addStretch()
+        
+        layout.addWidget(self.file_table, 10)
+        layout.addLayout(controls_layout, 1)
+        return layout
 
-        # Output options
-        output_layout = QHBoxLayout()
-        self.output_label = QLabel(_("Output Folder:"))
-        self.output_path_display = QLabel("")
+    def _create_output_layout(self) -> QVBoxLayout:
+        """创建输出和执行按钮的布局"""
+        layout = QVBoxLayout()
+        h_layout = QHBoxLayout()
+        
+        default_download_path = str(pathlib.Path.home() / "Downloads")
+        self.output_path_display = QLabel(default_download_path); self.output_path_display.setStyleSheet("color: grey;")
+        self.output_folder = default_download_path
+        
         self.select_output_button = QPushButton(_("Select Output Folder"))
-        self.select_output_button.clicked.connect(self.select_output_folder)
-        self.start_button = QPushButton(_("Start Processing"))
-        self.start_button.clicked.connect(self.start_processing)
+        self.start_button = QPushButton(_("Start Processing")); self.start_button.setStyleSheet("font-weight: bold; padding: 5px;")
 
-        output_layout.addWidget(self.output_label)
-        output_layout.addWidget(self.output_path_display, 1)
-        output_layout.addWidget(self.select_output_button)
-        output_layout.addWidget(self.start_button)
-        layout.addLayout(output_layout)
-
+        h_layout.addWidget(QLabel(_("Output Folder:"))); h_layout.addWidget(self.output_path_display, 1)
+        h_layout.addWidget(self.select_output_button); h_layout.addWidget(self.start_button)
+        
+        checkbox_layout = QHBoxLayout()
         self.merge_checkbox = QCheckBox(_("Merge after processing"))
-        layout.addWidget(self.merge_checkbox)
         self.page_number_checkbox = QCheckBox(_("Add page numbers after merge"))
-        layout.addWidget(self.page_number_checkbox)
+        checkbox_layout.addWidget(self.merge_checkbox); checkbox_layout.addWidget(self.page_number_checkbox)
+        checkbox_layout.addStretch()
 
-        self.progress_label = QLabel("")
-        self.progress_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.progress_label)
+        self.progress_label = QLabel(""); self.progress_label.setAlignment(Qt.AlignCenter)
 
-        central.setLayout(layout)
-        self.setCentralWidget(central)
+        layout.addLayout(h_layout); layout.addLayout(checkbox_layout); layout.addWidget(self.progress_label)
+        return layout
+    
+    def _create_warning_label(self) -> QLabel:
+        label = QLabel("⚠️"); label.setToolTip(_("This position is too close to the edge...")); label.setVisible(False)
+        return label
 
-        # Connect settings changes to preview update
-        self.x_input.valueChanged.connect(self.update_preview)
-        self.y_input.valueChanged.connect(self.update_preview)
-        self.font_size_spin.valueChanged.connect(self.update_preview)
+    def _setup_menu(self):
+        menubar = self.menuBar(); help_menu = menubar.addMenu(_("Help"))
+        about_action = help_menu.addAction(_("About")); about_action.triggered.connect(self.show_about_dialog)
 
-        # Connect footer input widgets to validation and preview logic
-        self.footer_y_input.valueChanged.connect(self._validate_positions)
-        self.footer_font_size_spin.valueChanged.connect(self.update_preview)
-        self.footer_x_input.valueChanged.connect(self.update_preview)
-        self._validate_positions()
+    def _map_settings_to_widgets(self):
+        """将设置项键名映射到UI控件，用于简化配置的存取"""
+        self.settings_map = {
+            "header_font_name": self.font_select, "header_font_size": self.font_size_spin,
+            "header_x": self.x_input, "header_y": self.y_input,
+            "footer_font_name": self.footer_font_select, "footer_font_size": self.footer_font_size_spin,
+            "footer_x": self.footer_x_input, "footer_y": self.footer_y_input,
+            "merge": self.merge_checkbox, "page_numbering": self.page_number_checkbox
+        }
+
+    def _connect_signals(self):
+        """使用循环和映射来连接信号与槽，减少重复代码"""
+        # --- 按钮点击 ---
+        button_slots = {
+            self.import_button: self.import_files,
+            self.clear_button: self.clear_file_list,
+            self.move_up_button: self.move_item_up,
+            self.move_down_button: self.move_item_down,
+            self.apply_footer_template_button: self.apply_global_footer_template,
+            self.select_output_button: self.select_output_folder,
+            self.start_button: self.start_processing,
+            self.left_btn: lambda: self._update_alignment("left", self.font_size_spin, self.x_input),
+            self.center_btn: lambda: self._update_alignment("center", self.font_size_spin, self.x_input),
+            self.right_btn: lambda: self._update_alignment("right", self.font_size_spin, self.x_input),
+            self.footer_left_btn: lambda: self._update_alignment("left", self.footer_font_size_spin, self.footer_x_input),
+            self.footer_center_btn: lambda: self._update_alignment("center", self.footer_font_size_spin, self.footer_x_input),
+            self.footer_right_btn: lambda: self._update_alignment("right", self.footer_font_size_spin, self.footer_x_input),
+        }
+        for btn, slot in button_slots.items():
+            btn.clicked.connect(slot)
+
+        # --- 值变化 ---
+        self.mode_select_combo.currentIndexChanged.connect(self.header_mode_changed)
+        self.file_table.customContextMenuRequested.connect(self._show_context_menu)
+        
+        auto_number_controls = [self.prefix_input, self.suffix_input, self.start_spin, self.step_spin, self.digits_spin]
+        for control in auto_number_controls:
+            if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
+            else: control.valueChanged.connect(self.update_header_texts)
+
+        # --- 统一更新预览和位置验证 ---
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input]
+        for control in preview_controls:
+            if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
+            else: control.valueChanged.connect(self.update_preview)
+        
+        validation_controls = [self.y_input, self.footer_y_input]
+        for control in validation_controls:
+            control.valueChanged.connect(self.update_preview)
+            control.valueChanged.connect(self._validate_positions)
+
+        # --- 特殊联动 ---
+        self.font_select.currentTextChanged.connect(self._on_font_changed)
+        self.footer_font_select.currentTextChanged.connect(self._on_font_changed)
+
+    # --- UI State and Interaction Methods ---
+    def _set_controls_enabled(self, enabled: bool):
+        """启用或禁用所有输入控件"""
+        self.import_button.setEnabled(enabled)
+        self.clear_button.setEnabled(enabled)
+        self.file_table.setEnabled(enabled)
+        self.move_up_button.setEnabled(enabled)
+        self.move_down_button.setEnabled(enabled)
+        self.start_button.setEnabled(enabled)
+        
+        groups = [self.auto_number_group, self.centralWidget().findChild(QGroupBox, "Header & Footer Settings")]
+        for group in groups:
+            if group:
+                for widget in group.findChildren((QPushButton, QComboBox, QSpinBox, QLineEdit, QCheckBox)):
+                    widget.setEnabled(enabled)
+    
+    def _update_ui_state(self):
+        """根据当前是否有文件来更新UI控件的启用状态"""
+        has_files = bool(self.file_items)
+        self._set_controls_enabled(True)
+        
+        if not has_files:
+            widgets_to_disable = [self.clear_button, self.start_button, self.move_up_button, self.move_down_button, self.auto_number_group]
+            settings_group = self.centralWidget().findChild(QGroupBox, "Header & Footer Settings")
+            if settings_group: widgets_to_disable.append(settings_group)
+            
+            for widget in widgets_to_disable:
+                widget.setEnabled(False)
+        
+        self.start_button.setEnabled(has_files)
+
+    def _on_font_changed(self, text: str):
+        """当字体改变时，如果是首次，则同步页眉和页脚的字体选择。"""
+        if not self._font_linked_once:
+            self._font_linked_once = True
+            sender = self.sender()
+            
+            self.font_select.blockSignals(True); self.footer_font_select.blockSignals(True)
+            if sender == self.font_select: self.footer_font_select.setCurrentText(text)
+            else: self.font_select.setCurrentText(text)
+            self.font_select.blockSignals(False); self.footer_font_select.blockSignals(False)
 
     def _show_context_menu(self, pos):
+        """显示文件列表的右键菜单"""
         index = self.file_table.indexAt(pos)
-        if not index.isValid():
-            return
-        from PySide6.QtWidgets import QMenu, QInputDialog, QMessageBox
+        if not index.isValid(): return
         menu = QMenu(self)
         unlock_action = menu.addAction("移除文件限制...")
         unlock_action.triggered.connect(lambda: self._attempt_unlock(index.row()))
         menu.exec(self.file_table.viewport().mapToGlobal(pos))
 
-    def _attempt_unlock(self, row_index):
-        from PySide6.QtWidgets import QInputDialog, QMessageBox
+    def _attempt_unlock(self, row_index: int):
+        """尝试解密选定的PDF文件，并提供详细错误反馈"""
         item = self.file_items[row_index]
-        if not hasattr(self, 'output_folder') or not self.output_folder:
-            QMessageBox.warning(self, _("Output Folder Not Set"),
-                                _("Please select an output folder before unlocking a file."))
-            return
+        if not self.output_folder:
+            QMessageBox.warning(self, _("Output Folder Not Set"), _("Please select an output folder...")); return
         password, ok = QInputDialog.getText(self, "解密PDF", f"输入密码以解锁: {item.name}")
-        if not ok:
-            return
-        # Call controller and let it determine output path; pass output_dir if available
-        result = self.controller.handle_unlock_pdf(
-            item=item,
-            password=password,
-            output_dir=getattr(self, "output_folder", None)
-        )
+        if not ok: return
+
+        result = self.controller.handle_unlock_pdf(item=item, password=password, output_dir=self.output_folder)
 
         if result["success"]:
             QMessageBox.information(self, "解锁成功", result["message"])
-            # 重新导入解锁后的文件
-            new_items = self.controller.handle_file_import([result.get("output_path")])
-            self.file_items.extend(new_items)
-            self._populate_table_from_items(self.file_items)
+            new_item_list = self.controller.handle_file_import([result.get("output_path")])
+            if new_item_list:
+                self.file_items[row_index] = new_item_list[0]
+                self._populate_table_from_items()
         else:
-            QMessageBox.warning(self, "解锁失败", result["message"])
-    def update_footer_alignment(self, alignment):
-        font_size = self.footer_font_size_spin.value()
-        page_width = 595
+            # 显示从后端返回的具体错误信息
+            self.show_error(_("Unlock Failed"), Exception(result["message"]))
+
+    def _update_alignment(self, alignment: str, font_size_spin: QSpinBox, x_input: QSpinBox):
+        """根据对齐方式更新X坐标（通用函数）"""
         from position_utils import estimate_standard_header_width, get_aligned_x_position
-        footer_width = estimate_standard_header_width(font_size)
-        new_x = int(get_aligned_x_position(alignment, page_width, footer_width))
-        self.footer_x_input.setValue(new_x)
+        text_width = estimate_standard_header_width(font_size_spin.value())
+        new_x = int(get_aligned_x_position(alignment, 595, text_width))
+        x_input.setValue(new_x)
+        self.update_preview()
 
-    def update_alignment(self, alignment):
-        if not hasattr(self, 'file_items') or not self.file_items:
-            return
-        font_size = self.font_size_spin.value()
-        page_width = 595  # A4 portrait width in points
-        from position_utils import estimate_standard_header_width
-        header_width = estimate_standard_header_width(font_size)
-        new_x = int(get_aligned_x_position(alignment, page_width, header_width))
-        self.x_input.setValue(new_x)
+    def _reset_auto_number_fields(self):
+        """重置自动编号相关的输入控件"""
+        self.prefix_input.setText("Doc-"); self.start_spin.setValue(1)
+        self.step_spin.setValue(1); self.digits_spin.setValue(3); self.suffix_input.clear()
 
-    def header_mode_changed(self, index):
-        if index == 0:
-            self.mode = "filename"
-            self.auto_number_group.setVisible(False)
-            self.update_header_texts(mode="filename")
-        elif index == 1:
-            self.mode = "auto_number"
-            self.auto_number_group.setVisible(True)
-            self.update_header_texts(mode="auto_number")
-        else:
-            self.mode = "custom"
-            self.auto_number_group.setVisible(False)
-            self.update_header_texts(mode="custom")
+    # --- Core Logic Methods ---
+    def header_mode_changed(self, index: int):
+        """处理页眉模式切换，并清理UI状态"""
+        modes = [self.MODE_FILENAME, self.MODE_AUTO_NUMBER, self.MODE_CUSTOM]
+        self.mode = modes[index]
+        self.auto_number_group.setVisible(self.mode == self.MODE_AUTO_NUMBER)
+        if self.mode != self.MODE_AUTO_NUMBER: self._reset_auto_number_fields()
+        self.update_header_texts()
 
-    def update_header_texts(self, mode="filename"):
-        if not hasattr(self, 'file_items'):
-            return
-
-        prefix = self.prefix_input.text()
-        start = self.start_spin.value()
-        step = self.step_spin.value()
-        suffix = self.suffix_input.text()
-
+    def update_header_texts(self):
+        """根据当前模式更新所有文件的页眉文本"""
+        if not self.file_items: return
         self.controller.apply_header_mode(
-            file_items=self.file_items,
-            mode=mode,
-            numbering_prefix=prefix,
-            numbering_start=start,
-            numbering_step=step,
-            numbering_suffix=suffix
+            file_items=self.file_items, mode=self.mode,
+            numbering_prefix=self.prefix_input.text(), numbering_start=self.start_spin.value(),
+            numbering_step=self.step_spin.value(), numbering_suffix=self.suffix_input.text(),
+            numbering_digits=self.digits_spin.value()
         )
-
-        for idx, item in enumerate(self.file_items):
-            if self.file_table.item(idx, 4):
-                self.file_table.item(idx, 4).setText(item.header_text)
+        self._populate_table_from_items()
+        self.update_preview()
 
     def import_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, _("Select PDF Files or Folders"), "", "PDF Files (*.pdf)"
-        )
-        if paths:
-            try:
-                self.file_items = self.controller.handle_file_import(paths)
-                self._populate_table_from_items(self.file_items)
-            except Exception as e:
-                self.show_error(_("Failed to import files"), e)
+        """打开文件对话框以导入PDF文件"""
+        paths, _ = QFileDialog.getOpenFileNames(self, _("Select PDF Files or Folders"), "", "PDF Files (*.pdf)")
+        if paths: self._process_imported_paths(paths)
 
-    def _populate_table_from_items(self, file_items):
+    def clear_file_list(self):
+        """清空文件列表"""
+        self.file_items.clear()
+        self._populate_table_from_items()
+
+    def _populate_table_from_items(self):
+        """用文件数据填充表格"""
         self.file_table.setRowCount(0)
-        for idx, item in enumerate(file_items):
+        for idx, item in enumerate(self.file_items):
             self.file_table.insertRow(idx)
             self.file_table.setItem(idx, 0, QTableWidgetItem(str(idx + 1)))
-            self.file_table.setItem(idx, 1, QTableWidgetItem(item.name))
-            self.file_table.setItem(idx, 2, QTableWidgetItem(f"{item.size_mb}"))
+            name_item = QTableWidgetItem(item.name); name_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled); name_item.setToolTip(item.name)
+            self.file_table.setItem(idx, 1, name_item)
+            self.file_table.setItem(idx, 2, QTableWidgetItem(f"{item.size_mb:.2f}"))
             self.file_table.setItem(idx, 3, QTableWidgetItem(str(item.page_count)))
-            header_item = QTableWidgetItem(item.header_text)
-            self.file_table.setItem(idx, 4, header_item)
-            self.file_table.setItem(idx, 5, QTableWidgetItem(item.header_font or ""))
-            self.file_table.setItem(idx, 6, QTableWidgetItem(str(item.header_font_size or "")))
-            self.file_table.setItem(idx, 7, QTableWidgetItem(str(item.header_x or "")))
-            self.file_table.setItem(idx, 8, QTableWidgetItem(str(item.header_y or "")))
-            # 页脚相关三列
-            self.file_table.setItem(idx, 9, QTableWidgetItem(item.footer_font or ""))
-            self.file_table.setItem(idx, 10, QTableWidgetItem(str(item.footer_font_size or "")))
-            self.file_table.setItem(idx, 11, QTableWidgetItem(str(item.footer_y or "")))
-            # 页脚X
-            self.file_table.setItem(idx, 12, QTableWidgetItem(str(item.footer_x or "")))
+            self.file_table.setItem(idx, 4, QTableWidgetItem(item.header_text))
+            self.file_table.setItem(idx, 5, QTableWidgetItem(item.footer_text or ""))
+        
+        self._update_ui_state()
+        if self.file_items: self._font_linked_once = False
 
-        # 异步字体推荐逻辑
-        from PySide6.QtCore import QTimer
-        def recommend_fonts():
-            # The controller.get_recommended_fonts now handles all internal extraction and logic.
-            recommended_fonts = self.controller.get_recommended_fonts([item.path for item in file_items[:3]])
-            if recommended_fonts:
-                existing_fonts = [self.font_select.itemText(i) for i in range(self.font_select.count())]
-                for font in reversed(recommended_fonts):
-                    if font not in existing_fonts:
-                        self.font_select.insertItem(0, font)
-                if recommended_fonts and recommended_fonts[0] == "---":
-                    self.font_select.insertSeparator(len(recommended_fonts))
-        QTimer.singleShot(200, recommend_fonts)
-
+    def _recommend_fonts(self):
+        """从文件中提取并推荐字体"""
+        if not self.file_items: return
+        recommended = self.controller.get_recommended_fonts_cached([item.path for item in self.file_items[:3]])
+        if recommended:
+            existing = [self.font_select.itemText(i) for i in range(self.font_select.count())]
+            for font in reversed(recommended):
+                if font not in existing: self.font_select.insertItem(0, font)
+            if recommended and recommended[0] == "---": self.font_select.insertSeparator(len(recommended))
 
     def select_output_folder(self):
+        """选择输出文件夹"""
         folder = QFileDialog.getExistingDirectory(self, _("Select Output Directory"))
-        if folder:
-            self.output_path_display.setText(folder)
-            self.output_folder = folder
+        if folder: self.output_path_display.setText(folder); self.output_folder = folder
+
+    def move_item_up(self):
+        """上移选中的文件"""
+        selected_rows = sorted([r.row() for r in self.file_table.selectionModel().selectedRows()], reverse=True)
+        for row in selected_rows:
+            if row > 0:
+                self.file_items.insert(row - 1, self.file_items.pop(row))
+        self._populate_table_from_items()
+
+    def move_item_down(self):
+        """下移选中的文件"""
+        selected_rows = sorted([r.row() for r in self.file_table.selectionModel().selectedRows()])
+        for row in selected_rows:
+            if row < len(self.file_items) - 1:
+                self.file_items.insert(row + 1, self.file_items.pop(row))
+        self._populate_table_from_items()
+
+    def apply_global_footer_template(self):
+        """将全局页脚模板应用到所有文件"""
+        template = self.global_footer_text.text()
+        if not template: return
+        for item in self.file_items:
+            item.footer_text = template
+        self._populate_table_from_items()
 
     def start_processing(self):
-        # Ensure self.mode is defined before being used
-        self.mode = getattr(self, 'mode', 'filename')
+        """开始批处理流程"""
+        if not self.file_items: QMessageBox.warning(self, _("No Files"), _("Please import PDF files first.")); return
+        if not self.output_folder: QMessageBox.warning(self, _("No Output Folder"), _("Please select an output folder.")); return
 
-        if not hasattr(self, 'file_items') or not self.file_items:
-            QMessageBox.warning(self, _("No Files"), _("Please import PDF files first."))
-            return
-        if not hasattr(self, 'output_folder') or not self.output_folder:
-            QMessageBox.warning(self, _("No Output Folder"), _("Please select an output folder."))
-            return
-
-        # ▼▼▼ 新增：同步表格编辑到数据模型（包括header和footer） ▼▼▼
+        self._set_controls_enabled(False)
         try:
             for row in range(self.file_table.rowCount()):
                 self.file_items[row].header_text = self.file_table.item(row, 4).text()
-                self.file_items[row].header_font = self.file_table.item(row, 5).text()
-                try:
-                    self.file_items[row].header_font_size = int(self.file_table.item(row, 6).text() or 0)
-                    self.file_items[row].header_x = int(self.file_table.item(row, 7).text() or 0)
-                    self.file_items[row].header_y = int(self.file_table.item(row, 8).text() or 0)
-                except Exception as e:
-                    logger.warning("Invalid per-file header settings", exc_info=True)
-                # 同步footer相关字段
-                try:
-                    self.file_items[row].footer_font = self.file_table.item(row, 9).text() or ""
-                    self.file_items[row].footer_font_size = int(self.file_table.item(row, 10).text() or 0)
-                    self.file_items[row].footer_y = int(self.file_table.item(row, 11).text() or 0)
-                    self.file_items[row].footer_x = int(self.file_table.item(row, 12).text() or 0)
-                except Exception as e:
-                    logger.warning("Invalid per-file footer settings", exc_info=True)
+                self.file_items[row].footer_text = self.file_table.item(row, 5).text()
         except Exception as e:
-            logger.error("同步表格数据时出错", exc_info=True)
-        # ▲▲▲ 新增完毕 ▲▲▲
+            logger.error("Error syncing data from table", exc_info=True)
+        
+        settings = self._get_current_settings()
+        header_settings = {k.replace('header_', ''): v for k, v in settings.items() if k.startswith('header_')}
+        footer_settings = {k.replace('footer_', ''): v for k, v in settings.items() if k.startswith('footer_')}
 
-        # Prepare header and footer settings dicts
-        header_settings = {
-            "font_name": self.font_select.currentText(),
-            "font_size": self.font_size_spin.value(),
-            "x": self.x_input.value(),
-            "y": self.y_input.value()
-        }
-        footer_settings = {
-            "font_name": self.footer_font_select.currentText(),
-            "font_size": self.footer_font_size_spin.value(),
-            "x": self.footer_x_input.value(),
-            "y": self.footer_y_input.value()
-        }
-
-        self.start_button.setEnabled(False)
         self.progress_label.setText(_("Processing... (0%)"))
-
         self.thread = QThread()
         self.worker = Worker(self.controller, self.file_items, self.output_folder, header_settings, footer_settings)
         self.worker.moveToThread(self.thread)
-
         self.thread.started.connect(self.worker.run)
         self.worker.signals.finished.connect(self.on_processing_finished)
         self.worker.signals.progress.connect(self.update_progress)
-        self.worker.signals.finished.connect(self.thread.quit)
-        self.worker.signals.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-
         self.thread.start()
 
-    def handle_merge_confirmation(self, ordered_paths):
-        save_path, _ = QFileDialog.getSaveFileName(self, _("Save Merged PDF"), "", "PDF Files (*.pdf)")
-        if not save_path:
-            return
-        success, err = merge_pdfs(ordered_paths, save_path)
-        if success:
-            if self.page_number_checkbox.isChecked():
-                try:
-                    add_page_numbers(
-                        input_pdf=save_path,
-                        output_pdf=save_path,
-                        font_name=self.footer_font_select.currentText(),
-                        font_size=self.footer_font_size_spin.value(),
-                        x=self.footer_x_input.value(),
-                        y=self.footer_y_input.value()
-                    )
-                    QMessageBox.information(self, _("Merged"),
-                        _("Files merged and page numbers added successfully:\n") + save_path)
-                except Exception as e:
-                    self.progress_label.setText(_("Failed to add page numbers"))
-                    logger.error("Failed to add page numbers", exc_info=True)
-                    QMessageBox.warning(self, _("Page Number Error"), str(e))
-            else:
-                QMessageBox.information(self, _("Merged"),
-                    _("Files merged successfully:\n") + save_path)
-        else:
-            QMessageBox.warning(self, _("Merge Failed"), err)
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        if not event.mimeData().hasUrls():
-            return
-        try:
-            paths = [url.toLocalFile() for url in event.mimeData().urls()]
-            self.file_items = self.controller.handle_file_import(paths)
-            self._populate_table_from_items(self.file_items)
-            event.acceptProposedAction()
-        except Exception as e:
-            self.show_error(_("Failed to handle drag-and-drop import"), e)
-    def update_preview(self):
-        from PySide6.QtGui import QPixmap
-        canvas = QPixmap(420, 595)
-        canvas.fill(Qt.white)
-        painter = QPainter(canvas)
-        painter.setPen(QPen(Qt.black))
-        font = QFont(self.font_select.currentText(), self.font_size_spin.value())
-        painter.setFont(font)
-        preview_scale_x = 0.7  # scale input to preview canvas width (595pt to 420px)
-        x = self.x_input.value() * preview_scale_x
-        y = self.y_input.value()       # already near 1:1 on height
-        painter.drawText(int(x), int(y), "示例 Header")  # preview text
-        # Draw footer preview
-        footer_font = QFont(self.footer_font_select.currentText(), self.footer_font_size_spin.value())
-        painter.setFont(footer_font)
-        fx = self.footer_x_input.value() * preview_scale_x
-        fy = self.footer_y_input.value()
-        painter.drawText(int(fx), int(fy), "示例 Footer")
-        painter.end()
-        self.preview_canvas.setPixmap(canvas)
-    def _validate_positions(self):
-        from position_utils import is_out_of_print_safe_area
-
-        header_y = self.y_input.value()
-        is_header_unsafe = is_out_of_print_safe_area(header_y, top=True)
-        self.header_y_warning_label.setVisible(is_header_unsafe)
-
-        footer_y = self.footer_y_input.value()
-        is_footer_unsafe = is_out_of_print_safe_area(footer_y, top=False)
-        self.footer_y_warning_label.setVisible(is_footer_unsafe)
-    def _apply_settings(self, settings):
-        if not settings:
-            return
-        from config import apply_defaults
-        try:
-            settings = apply_defaults(settings)
-        except Exception as e:
-            logger.warning("Failed to apply default settings: %s", e)
-            return
-        try:
-            self.font_select.setCurrentText(settings.get("font", self.font_select.currentText()))
-            self.font_size_spin.setValue(settings.get("font_size", self.font_size_spin.value()))
-            self.x_input.setValue(settings.get("x", self.x_input.value()))
-            self.y_input.setValue(settings.get("y", self.y_input.value()))
-            self.footer_font_select.setCurrentText(settings.get("footer_font", self.footer_font_select.currentText()))
-            self.footer_font_size_spin.setValue(settings.get("footer_font_size", self.footer_font_size_spin.value()))
-            self.footer_x_input.setValue(settings.get("footer_x", self.footer_x_input.value()))
-            self.footer_y_input.setValue(settings.get("footer_y", self.footer_y_input.value()))
-            self.merge_checkbox.setChecked(settings.get("merge", self.merge_checkbox.isChecked()))
-            self.page_number_checkbox.setChecked(settings.get("page_number", self.page_number_checkbox.isChecked()))
-        except Exception as e:
-            logger.warning("Failed to apply settings: %s", e)
-
-    def closeEvent(self, event):
-        from config import save_settings
-        settings = {
-            "font": self.font_select.currentText(),
-            "font_size": self.font_size_spin.value(),
-            "x": self.x_input.value(),
-            "y": self.y_input.value(),
-            "footer_font": self.footer_font_select.currentText(),
-            "footer_font_size": self.footer_font_size_spin.value(),
-            "footer_x": self.footer_x_input.value(),
-            "footer_y": self.footer_y_input.value(),
-            "merge": self.merge_checkbox.isChecked(),
-            "page_number": self.page_number_checkbox.isChecked()
-        }
-        save_settings(settings)
-        event.accept()
-    def show_error(self, message, exception=None):
-        self.progress_label.setText(message)
-        if exception:
-            logger.error(message, exc_info=True)
-            self.statusBar().showMessage(str(exception))
-        QMessageBox.critical(self, _("Error"), message)
-    def update_progress(self, current, total, filename):
-        percent = int((current / total) * 100)
-        self.progress_label.setText(f"{_('Processing...')} ({percent}%) - {filename}")
-
-    def on_processing_finished(self, results):
-        self.start_button.setEnabled(True)
-        self.processed_paths = []
-        failed = []
-        for result in results:
-            if result["success"]:
-                self.processed_paths.append(result["output"])
-            else:
-                failed.append((result["input"], result["error"]))
+    def on_processing_finished(self, results: list):
+        """处理完成后的回调函数"""
+        self.processed_paths = [res["output"] for res in results if res["success"]]
+        failed = [res for res in results if not res["success"]]
 
         self.progress_label.setText(_("Completed {} files").format(len(self.processed_paths)))
 
         if failed:
-            msg = "\n".join([f"{os.path.basename(name)}: {err}" for name, err in failed])
-            self.progress_label.setText(_("Some files failed. See details."))
+            msg = "\n".join([f"{os.path.basename(res['input'])}: {res['error']}" for res in failed])
             QMessageBox.warning(self, _("Some Files Failed"), msg)
         else:
             QMessageBox.information(self, _("Done"), _("All files processed successfully."))
-            # Also clear the progress label if all files succeeded
             self.progress_label.setText("")
-            if self.merge_checkbox.isChecked():
-                dlg = MergeDialog(self.processed_paths, self)
-                dlg.merge_confirmed.connect(self.handle_merge_confirmation)
-                dlg.exec()
+
+        if self.merge_checkbox.isChecked() and self.processed_paths:
+            dlg = MergeDialog(self.processed_paths, self)
+            dlg.merge_confirmed.connect(self.handle_merge_confirmation)
+            dlg.exec()
+        
+        self._set_controls_enabled(True)
+
+    def handle_merge_confirmation(self, ordered_paths: list):
+        """处理合并确认后的逻辑，包含统一的成功/失败提示"""
+        save_path, _ = QFileDialog.getSaveFileName(self, _("Save Merged PDF"), "", "PDF Files (*.pdf)")
+        if not save_path: return
+        
+        try:
+            success, err = merge_pdfs(ordered_paths, save_path)
+            if not success: raise Exception(err)
+
+            final_message = _("Files merged successfully and saved to:\n") + save_path
+            if self.page_number_checkbox.isChecked():
+                add_page_numbers(
+                    input_pdf=save_path, output_pdf=save_path,
+                    font_name=self.footer_font_select.currentText(), font_size=self.footer_font_size_spin.value(),
+                    x=self.footer_x_input.value(), y=self.footer_y_input.value()
+                )
+                final_message = _("Files merged and page numbers added successfully:\n") + save_path
+            
+            QMessageBox.information(self, _("Success"), final_message)
+        except Exception as e:
+            self.show_error(_("Operation Failed"), e)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls(): event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """处理文件拖放，增强校验"""
+        if not event.mimeData().hasUrls(): return
+        urls = event.mimeData().urls()
+        paths = [url.toLocalFile() for url in urls if url.isLocalFile() and url.toLocalFile().lower().endswith('.pdf')]
+        
+        if not paths: QMessageBox.warning(self, _("Invalid Files"), _("Only PDF files can be imported.")); return
+        self._process_imported_paths(paths)
+        event.acceptProposedAction()
+
+    def _process_imported_paths(self, paths: list):
+        """处理导入的文件路径列表（来自对话框或拖放）"""
+        try:
+            new_items = self.controller.handle_file_import(paths)
+            self.file_items.extend(new_items)
+            self._populate_table_from_items()
+            QTimer.singleShot(100, self._recommend_fonts)
+        except Exception as e:
+            self.show_error(_("Failed to import files"), e)
+
+    def update_preview(self):
+        """更新页眉页脚位置的预览图像"""
+        pixmap = QPixmap(210, 60); pixmap.fill(Qt.white); painter = QPainter(pixmap)
+        settings = self._get_current_settings()
+        
+        painter.setPen(QPen(Qt.black))
+        header_font_name = settings.get("header_font_name", "Helvetica")
+        if not QFont(header_font_name).exactMatch(): header_font_name = QFont().defaultFamily()
+        painter.setFont(QFont(header_font_name, settings.get("header_font_size", 9) * 0.5))
+        x = settings.get("header_x", 72) * 0.35; y = (60 - settings.get("header_y", 772) * 0.05) - 15
+        painter.drawText(int(x), int(y), "Header")
+
+        painter.setPen(QPen(Qt.darkGray))
+        footer_font_name = settings.get("footer_font_name", "Helvetica")
+        if not QFont(footer_font_name).exactMatch(): footer_font_name = QFont().defaultFamily()
+        painter.setFont(QFont(footer_font_name, settings.get("footer_font_size", 9) * 0.5))
+        fx = settings.get("footer_x", 72) * 0.35; fy = settings.get("footer_y", 40) * 0.35 + 10
+        painter.drawText(int(fx), int(fy), "Footer")
+        
+        painter.end(); self.preview_canvas.setPixmap(pixmap)
+
+    def _validate_positions(self):
+        """验证Y坐标是否在打印安全区内"""
+        self.header_y_warning_label.setVisible(is_out_of_print_safe_area(self.y_input.value(), top=True))
+        self.footer_y_warning_label.setVisible(is_out_of_print_safe_area(self.footer_y_input.value(), top=False))
+
+    def _get_current_settings(self) -> dict:
+        """从UI控件中提取所有设置项"""
+        settings = {}
+        for key, widget in self.settings_map.items():
+            if isinstance(widget, QComboBox): settings[key] = widget.currentText()
+            elif isinstance(widget, QSpinBox): settings[key] = widget.value()
+            elif isinstance(widget, QCheckBox): settings[key] = widget.isChecked()
+        return settings
+
+    def _apply_settings(self, settings: dict):
+        """将加载的配置应用到UI控件，增强容错"""
+        if not settings: return
+        from config import apply_defaults
+        try:
+            settings = apply_defaults(settings)
+            for key, widget in self.settings_map.items():
+                if key in settings:
+                    if isinstance(widget, QComboBox): widget.setCurrentText(settings[key])
+                    elif isinstance(widget, QSpinBox): widget.setValue(settings[key])
+                    elif isinstance(widget, QCheckBox): widget.setChecked(settings[key])
+            self.update_preview()
+        except Exception as e:
+            self.show_error(_("Failed to apply settings due to an error. Please check the logs."), e)
+
+    def closeEvent(self, event):
+        """在关闭应用前保存设置"""
+        from config import save_settings
+        save_settings(self._get_current_settings())
+        event.accept()
+
+    def show_error(self, message: str, exception: Exception = None):
+        """显示错误信息对话框和日志，增强日志记录"""
+        self.progress_label.setText(message)
+        if exception: logger.error(f"UI Error: '{message}'", exc_info=True)
+        QMessageBox.critical(self, _("Error"), f"{message}\n\n{str(exception or '')}")
+    
+    def update_progress(self, current: int, total: int, filename: str):
+        """更新进度条标签"""
+        percent = int((current / total) * 100)
+        self.progress_label.setText(f"{_('Processing...')} ({percent}%) - {filename}")
+    
     def show_about_dialog(self):
+        """显示关于对话框"""
         QMessageBox.about(
-            self,
-            "About DocDeck",
+            self, "About DocDeck",
             "DocDeck - PDF Header & Footer Tool\n"
-            "Version 1.0beta\n\n"
+            "Version 1.6 (Production Refined)\n\n"
             "Author: 木小樨\n"
             "Project Homepage:\n"
             "https://hs2wxdogy2.feishu.cn/wiki/Kjv3wQfV5iKpGXkQ8aCcOkj6nVf"
