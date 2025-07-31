@@ -9,7 +9,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4 # 更新 checkout 版本
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,14 +21,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+          brew install create-dmg
+
+      - name: Convert PNG to ICNS for macOS
+        run: |
+          if [ ! -f "icon/docdeck.png" ]; then echo "Error: icon/docdeck.png not found!"; exit 1; fi
+          mkdir -p icon.iconset
+          sips -z 16 16     icon/docdeck.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     icon/docdeck.png --out icon.iconset/icon_32x32.png
+          sips -z 128 128   icon/docdeck.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   icon/docdeck.png --out icon.iconset/icon_256x256.png
+          iconutil -c icns icon.iconset -o icon/docdeck.icns
+          rm -r icon.iconset
 
       - name: Build with PyInstaller
-        # 直接使用仓库中的 .icns 文件
-        run: pyinstaller --windowed --name "DocDeck" --icon=icon/docdeck.icns main.py
+        run: pyinstaller --noconfirm --clean --windowed --name "DocDeck" --icon=icon/docdeck.icns main.py
 
       - name: Create .dmg installer
         run: |
-          brew install create-dmg
           create-dmg "dist/DocDeck.app" \
             --overwrite \
             --volname "DocDeck Installer" \
@@ -41,7 +51,7 @@ jobs:
             "dist/DocDeck-macOS-${{ github.ref_name }}.dmg"
 
       - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4 # 【已修正】使用 v4 版本
+        uses: actions/upload-artifact@v4
         with:
           name: DocDeck-macOS-dmg
           path: "dist/DocDeck-macOS-${{ github.ref_name }}.dmg"
@@ -49,30 +59,23 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4 # 更新 checkout 版本
-
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install pyinstaller pillow
-
       - name: Convert PNG to ICO
-        run: |
-          python -c "from PIL import Image; Image.open('icon/docdeck.png').save('icon/docdeck.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (32,32), (16,16)])"
-
+        run: python -c "from PIL import Image; Image.open('icon/docdeck.png').save('icon/docdeck.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (32,32), (16,16)])"
       - name: Build with PyInstaller
-        run: pyinstaller --windowed --name "DocDeck" --icon=icon/docdeck.ico main.py
-
+        run: pyinstaller --noconfirm --clean --windowed --name "DocDeck" --icon=icon/docdeck.ico main.py
       - name: Package as zip
         run: Compress-Archive -Path dist/DocDeck -DestinationPath "dist/DocDeck-Windows-${{ github.ref_name }}.zip"
-
       - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4 # 【已修正】使用 v4 版本
+        uses: actions/upload-artifact@v4
         with:
           name: DocDeck-Windows-zip
           path: "dist/DocDeck-Windows-${{ github.ref_name }}.zip"
@@ -80,29 +83,24 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # 更新 checkout 版本
-
+      - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
-
       - name: Build with PyInstaller
-        run: pyinstaller --windowed --name "DocDeck" --icon=icon/docdeck.png main.py
-
+        run: pyinstaller --noconfirm --clean --windowed --name "DocDeck" --icon=icon/docdeck.png main.py
       - name: Package as zip
         run: |
           cd dist
           zip -r "../DocDeck-Linux-${{ github.ref_name }}.zip" "DocDeck"
           cd ..
-          
       - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4 # 【已修正】使用 v4 版本
+        uses: actions/upload-artifact@v4
         with:
           name: DocDeck-Linux-zip
           path: "DocDeck-Linux-${{ github.ref_name }}.zip"
@@ -113,9 +111,11 @@ jobs:
     permissions:
       contents: write 
     steps:
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2 # 建议也更新到最新主版本
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          files: |
-            *.dmg
-            *.zip
+          path: release-assets
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**/*
