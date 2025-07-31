@@ -1,0 +1,26 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 构建输出目录
+build/
+dist/
+*.spec
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# VSCode 设置
+.vscode/
+
+# macOS 文件
+.DS_Store
+
+# 日志
+*.log
+
+# Icon & installer 临时输出
+*.icns
+*.ico
