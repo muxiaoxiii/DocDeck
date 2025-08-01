@@ -13,6 +13,8 @@ from typing import Optional, TypedDict
 
 from logger import logger
 
+class WrongPasswordError(Exception): pass
+
 class UnlockResult(TypedDict):
     success: bool
     message: str
@@ -34,7 +36,7 @@ def _unlock_with_pikepdf(input_path: str, output_path: str, password: str) -> tu
     """
     try:
         # Attempt to open and save PDF without the encryption dictionary
-        with pikepdf.open(input_path, password=password, allow_overwriting_input=True) as pdf:
+        with pikepdf.open(input_path, password=password) as pdf:
             pdf.save(output_path)
         return True, "成功：已通过高保真模式移除限制。"
     except PikePasswordError:
@@ -60,7 +62,7 @@ def _unlock_with_pypdf2(input_path: str, output_path: str, password: str) -> tup
         reader = PdfReader(input_path)
         if reader.is_encrypted:
             if not reader.decrypt(password):
-                raise PyPDF2DependencyError("密码错误")
+                raise WrongPasswordError("密码错误")
 
         # Rebuild document without encryption
         writer = PdfWriter()
@@ -71,7 +73,7 @@ def _unlock_with_pypdf2(input_path: str, output_path: str, password: str) -> tup
             writer.write(f)
         
         return True, "成功：已通过备用模式移除限制（书签等可能丢失）。"
-    except PyPDF2DependencyError as e:
+    except WrongPasswordError as e:
         raise
     except Exception as e:
         logger.error(f"[PyPDF2] 备用解密失败 ({input_path})。错误类型: {type(e).__name__}, 错误: {e}", exc_info=True)
@@ -120,7 +122,7 @@ def unlock_pdf(input_path: str, output_path: str, password: str = '') -> UnlockR
             "output_path": None
         }
 
-    except (PikePasswordError, PyPDF2DependencyError):
+    except (PikePasswordError, WrongPasswordError):
         msg = "密码错误或缺失。需要提供正确的密码才能打开此文件。"
         logger.warning(f"[Unlocker] '{input_path}' 解密失败: {msg}")
         return {

@@ -1,6 +1,12 @@
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+from enum import Enum
+
+class EncryptionStatus(str, Enum):
+    OK = "ok"
+    LOCKED = "locked"
+    RESTRICTED = "restricted"
 
 @dataclass
 class PDFFileItem:
@@ -15,6 +21,9 @@ class PDFFileItem:
     page_count: int               # Number of pages
     header_text: str              # Header text to be added
     footer_text: Optional[str] = "" # Footer text to be added (can be a template)
+    footer_digit: int = 1         # 页脚编号位数（例如 1 表示不补零，2 表示01、02）
+    encryption_status: EncryptionStatus = EncryptionStatus.OK
+    unlocked_path: Optional[str] = None  # Path to decrypted version, if available
 
 @dataclass
 class PDFProcessResult:
