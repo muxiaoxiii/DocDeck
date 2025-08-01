@@ -1,3 +1,4 @@
+# pdf_handler.py
 import os
 import traceback
 from PyPDF2 import PdfReader, PdfWriter
@@ -5,7 +6,7 @@ from PyPDF2.errors import PdfReadError
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from io import BytesIO
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 from models import PDFFileItem
 from PySide6.QtCore import QObject, Signal
 from file_namer import get_unique_filename
@@ -55,6 +56,8 @@ def process_pdfs_in_batch(
             logger.info(f"Processing file {idx + 1}/{total_files}: {item.name}")
             
             reader = PdfReader(item.path)
+            item.page_count = len(reader.pages)
+            item.encryption_status = "locked" if reader.is_encrypted else "ok"
             if reader.is_encrypted:
                 raise PdfReadError("File is encrypted. Please unlock it first.")
 
@@ -64,7 +67,6 @@ def process_pdfs_in_batch(
             for i, page in enumerate(reader.pages):
                 # --- Apply Header ---
                 if item.header_text:
-                    # <<< ENHANCEMENT: Added descriptive debug log for header ---
                     logger.debug(f"  - Page {i+1}: Applying header '{item.header_text}'")
                     _apply_overlay(
                         page, item.header_text,
@@ -76,10 +78,7 @@ def process_pdfs_in_batch(
 
                 # --- Apply Footer with Template Formatting ---
                 if item.footer_text:
-                    # Replace placeholders for current page and total pages
                     footer_text = item.footer_text.format(page=i + 1, total=page_total)
-                    
-                    # <<< ENHANCEMENT: Added descriptive debug log for footer ---
                     logger.debug(f"  - Page {i+1}: Applying footer '{footer_text}' (from template: '{item.footer_text}')")
                     _apply_overlay(
                         page, footer_text,
@@ -110,7 +109,7 @@ def process_pdfs_in_batch(
     
     return results
 
-def merge_pdfs(input_paths: List[str], output_path: str) -> (bool, str):
+def merge_pdfs(input_paths: List[str], output_path: str) -> Tuple[bool, Optional[str]]:
     """使用 PikePDF 合并多个PDF，以保留书签等元数据。"""
     try:
         new_pdf = pikepdf.Pdf.new()
@@ -126,7 +125,7 @@ def merge_pdfs(input_paths: List[str], output_path: str) -> (bool, str):
         logger.exception("An error occurred while merging PDFs.")
         return False, "PDF merge failed. See logs for details."
 
-def add_page_numbers(input_pdf: str, output_pdf: str, font_name="Helvetica", font_size=9, x=72, y=40):
+def add_page_numbers(input_pdf: str, output_pdf: str, font_name="Helvetica", font_size=9, x=72, y=40) -> Tuple[bool, Optional[str]]:
     """为PDF添加页码，格式为 '当前页 / 总页数'。"""
     try:
         reader = PdfReader(input_pdf)
@@ -138,7 +137,6 @@ def add_page_numbers(input_pdf: str, output_pdf: str, font_name="Helvetica", fon
 
         for i, page in enumerate(reader.pages):
             text = f"{i + 1} / {page_total}"
-            # <<< ENHANCEMENT: Added descriptive debug log for page numbers ---
             logger.debug(f"  - Page {i+1}: Adding page number '{text}'")
             _apply_overlay(page, text, font_name, font_size, x, y)
             writer.add_page(page)

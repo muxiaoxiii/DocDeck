@@ -124,5 +124,12 @@ def apply_defaults(settings: dict) -> dict:
         "language": DEFAULT_LANGUAGE,
     }
     for key, value in defaults.items():
-        settings.setdefault(key, value)
+        if key not in settings:
+            settings[key] = value
+        else:
+            if key in ["font_size", "header_y", "footer_y", "number_start", "number_step"]:
+                try:
+                    settings[key] = int(settings[key])
+                except Exception:
+                    settings[key] = value
     return settings

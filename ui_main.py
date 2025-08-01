@@ -2,6 +2,7 @@
 import os
 import pathlib
 from typing import Dict, Any
+from models import PDFFileItem
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QFileDialog, QMessageBox, QTableWidget,
     QTableWidgetItem, QLabel, QHBoxLayout, QHeaderView, QComboBox, QSpinBox, QCheckBox,
@@ -105,17 +106,13 @@ class MainWindow(QMainWindow):
         return group
 
     def _create_settings_grid_group(self) -> QGroupBox:
-        """创建页眉页脚的网格布局设置控件组"""
+        """创建页眉页脚的网格布局设置控件组（新版：设置与预览横向并排，预览为横条，仅Header/Footer）"""
         group = QGroupBox(_("Header & Footer Settings"))
+        group.setObjectName("Header & Footer Settings")
         grid = QGridLayout()
         grid.setColumnStretch(1, 1); grid.setColumnStretch(2, 1); grid.setColumnStretch(3, 1)
 
-        preview_label = QLabel(_("Position Preview")); preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(210, 60)
-        self.preview_canvas.setStyleSheet("background: white; border: 1px solid #ccc;")
-        preview_vbox = QVBoxLayout(); preview_vbox.addWidget(preview_label); preview_vbox.addWidget(self.preview_canvas, 0, Qt.AlignCenter)
-        grid.addLayout(preview_vbox, 0, 3, 6, 1)
-
+        # 设置控件部分
         grid.addWidget(QLabel("<b>" + _("Settings") + "</b>"), 0, 0, Qt.AlignRight)
         grid.addWidget(QLabel("<b>" + _("Header") + "</b>"), 0, 1, Qt.AlignCenter)
         grid.addWidget(QLabel("<b>" + _("Footer") + "</b>"), 0, 2, Qt.AlignCenter)
@@ -151,7 +148,20 @@ class MainWindow(QMainWindow):
         footer_template_layout = QHBoxLayout(); footer_template_layout.addWidget(self.global_footer_text); footer_template_layout.addWidget(self.apply_footer_template_button)
         grid.addLayout(footer_template_layout, 6, 1, 1, 2)
 
-        group.setLayout(grid)
+        # 新：预览区域横向长条，仅Header/Footer
+        preview_group = QVBoxLayout()
+        preview_label = QLabel(_("Header/Footer Preview")); preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(600, 80)
+        self.preview_canvas.setStyleSheet("background: white; border: 1px solid #ccc;")
+        preview_group.addWidget(preview_label)
+        preview_group.addWidget(self.preview_canvas)
+
+        # 横向布局：设置控件 + 预览
+        horizontal_layout = QHBoxLayout()
+        horizontal_layout.addLayout(grid, 3)
+        horizontal_layout.addLayout(preview_group, 2)
+
+        group.setLayout(horizontal_layout)
         return group
 
     def _create_table_area(self) -> QHBoxLayout:
@@ -168,7 +178,12 @@ class MainWindow(QMainWindow):
         controls_layout = QVBoxLayout()
         self.move_up_button = QPushButton(_("Move Up"))
         self.move_down_button = QPushButton(_("Move Down"))
-        controls_layout.addStretch(); controls_layout.addWidget(self.move_up_button); controls_layout.addWidget(self.move_down_button); controls_layout.addStretch()
+        self.remove_button = QPushButton(_("Remove"))
+        controls_layout.addStretch()
+        controls_layout.addWidget(self.move_up_button)
+        controls_layout.addWidget(self.move_down_button)
+        controls_layout.addWidget(self.remove_button)
+        controls_layout.addStretch()
         
         layout.addWidget(self.file_table, 10)
         layout.addLayout(controls_layout, 1)
@@ -220,15 +235,11 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         """使用循环和映射来连接信号与槽，减少重复代码"""
-        # --- 按钮点击 ---
         button_slots = {
-            self.import_button: self.import_files,
-            self.clear_button: self.clear_file_list,
-            self.move_up_button: self.move_item_up,
-            self.move_down_button: self.move_item_down,
+            self.import_button: self.import_files, self.clear_button: self.clear_file_list,
+            self.move_up_button: self.move_item_up, self.move_down_button: self.move_item_down,
             self.apply_footer_template_button: self.apply_global_footer_template,
-            self.select_output_button: self.select_output_folder,
-            self.start_button: self.start_processing,
+            self.select_output_button: self.select_output_folder, self.start_button: self.start_processing,
             self.left_btn: lambda: self._update_alignment("left", self.font_size_spin, self.x_input),
             self.center_btn: lambda: self._update_alignment("center", self.font_size_spin, self.x_input),
             self.right_btn: lambda: self._update_alignment("right", self.font_size_spin, self.x_input),
@@ -236,10 +247,10 @@ class MainWindow(QMainWindow):
             self.footer_center_btn: lambda: self._update_alignment("center", self.footer_font_size_spin, self.footer_x_input),
             self.footer_right_btn: lambda: self._update_alignment("right", self.footer_font_size_spin, self.footer_x_input),
         }
-        for btn, slot in button_slots.items():
-            btn.clicked.connect(slot)
+        for btn, slot in button_slots.items(): btn.clicked.connect(slot)
 
-        # --- 值变化 ---
+        self.remove_button.clicked.connect(self.remove_selected_items)
+
         self.mode_select_combo.currentIndexChanged.connect(self.header_mode_changed)
         self.file_table.customContextMenuRequested.connect(self._show_context_menu)
         
@@ -248,7 +259,6 @@ class MainWindow(QMainWindow):
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        # --- 统一更新预览和位置验证 ---
         preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
@@ -258,10 +268,19 @@ class MainWindow(QMainWindow):
         for control in validation_controls:
             control.valueChanged.connect(self.update_preview)
             control.valueChanged.connect(self._validate_positions)
+        # 新增: 监听Y坐标变化以更新预览
+        for control in validation_controls:
+            control.valueChanged.connect(self.update_preview)
 
-        # --- 特殊联动 ---
         self.font_select.currentTextChanged.connect(self._on_font_changed)
         self.footer_font_select.currentTextChanged.connect(self._on_font_changed)
+
+    def remove_selected_items(self):
+        selected_rows = sorted([r.row() for r in self.file_table.selectionModel().selectedRows()], reverse=True)
+        for row in selected_rows:
+            self.file_items.pop(row)
+            self.file_table.removeRow(row)
+        self._update_ui_state()
 
     # --- UI State and Interaction Methods ---
     def _set_controls_enabled(self, enabled: bool):
@@ -273,24 +292,34 @@ class MainWindow(QMainWindow):
         self.move_down_button.setEnabled(enabled)
         self.start_button.setEnabled(enabled)
         
+        # <<< FIX: Correctly iterate over widget types to call findChildren >>>
+        widget_types_to_toggle = (QPushButton, QComboBox, QSpinBox, QLineEdit, QCheckBox)
+        
         groups = [self.auto_number_group, self.centralWidget().findChild(QGroupBox, "Header & Footer Settings")]
+        
         for group in groups:
             if group:
-                for widget in group.findChildren((QPushButton, QComboBox, QSpinBox, QLineEdit, QCheckBox)):
-                    widget.setEnabled(enabled)
+                for widget_type in widget_types_to_toggle:
+                    for widget in group.findChildren(widget_type):
+                        # The start_button is not in these groups, so no special check needed.
+                        widget.setEnabled(enabled)
     
     def _update_ui_state(self):
         """根据当前是否有文件来更新UI控件的启用状态"""
         has_files = bool(self.file_items)
         self._set_controls_enabled(True)
         
-        if not has_files:
+        settings_group = self.centralWidget().findChild(QGroupBox, "Header & Footer Settings")
+        if has_files:
+            if settings_group:
+                settings_group.setEnabled(True)
+        else:
             widgets_to_disable = [self.clear_button, self.start_button, self.move_up_button, self.move_down_button, self.auto_number_group]
-            settings_group = self.centralWidget().findChild(QGroupBox, "Header & Footer Settings")
-            if settings_group: widgets_to_disable.append(settings_group)
-            
+            if settings_group:
+                widgets_to_disable.append(settings_group)
             for widget in widgets_to_disable:
-                widget.setEnabled(False)
+                if widget:
+                    widget.setEnabled(False)
         
         self.start_button.setEnabled(has_files)
 
@@ -308,7 +337,8 @@ class MainWindow(QMainWindow):
     def _show_context_menu(self, pos):
         """显示文件列表的右键菜单"""
         index = self.file_table.indexAt(pos)
-        if not index.isValid(): return
+        if not index.isValid():
+            return
         menu = QMenu(self)
         unlock_action = menu.addAction("移除文件限制...")
         unlock_action.triggered.connect(lambda: self._attempt_unlock(index.row()))
@@ -318,21 +348,87 @@ class MainWindow(QMainWindow):
         """尝试解密选定的PDF文件，并提供详细错误反馈"""
         item = self.file_items[row_index]
         if not self.output_folder:
-            QMessageBox.warning(self, _("Output Folder Not Set"), _("Please select an output folder...")); return
-        password, ok = QInputDialog.getText(self, "解密PDF", f"输入密码以解锁: {item.name}")
-        if not ok: return
-
-        result = self.controller.handle_unlock_pdf(item=item, password=password, output_dir=self.output_folder)
-
-        if result["success"]:
-            QMessageBox.information(self, "解锁成功", result["message"])
-            new_item_list = self.controller.handle_file_import([result.get("output_path")])
-            if new_item_list:
-                self.file_items[row_index] = new_item_list[0]
-                self._populate_table_from_items()
+            QMessageBox.warning(self, _("Output Folder Not Set"), _("Please select an output folder..."))
+            return
+        encryption_status = getattr(item, "encryption_status", "ok")
+        if encryption_status == "locked":
+            QMessageBox.warning(self, _("Locked File"), _("This file is encrypted and cannot be opened without a password."))
+            password, ok = QInputDialog.getText(self, _("Decrypt PDF"), f"{item.name}\n\n{_('Please enter the password:')}")
+            if not ok:
+                return
+        elif encryption_status == "restricted":
+            response = QMessageBox.question(
+                self, _("Restricted PDF"),
+                _("This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?"),
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if response == QMessageBox.No:
+                return
+            # Always use the UI's selected output folder
+            output_dir = self.output_folder
+            result = self.controller.handle_unlock_pdf(item=item, password="", output_dir=output_dir)
+            if result["success"]:
+                QMessageBox.information(self, _("Unlock Success"), result["message"])
+                if result.get("output_path"):
+                    self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                    self.output_path_display.setText(output_dir)
+                    new_items = self.controller.handle_file_import([result["output_path"]])
+                    if new_items:
+                        new_items[0].unlocked_path = result.get("output_path", None)
+                        self.file_items[row_index] = new_items[0]
+                        self._populate_table_from_items()
+            else:
+                self.show_error(_("Unlock Failed"), Exception(result["message"]))
+            return
         else:
-            # 显示从后端返回的具体错误信息
-            self.show_error(_("Unlock Failed"), Exception(result["message"]))
+            return  # Not encrypted or already handled
+
+        # 密码验证流程
+        attempts = 3
+        while attempts > 0:
+            output_dir = self.output_folder
+            result = self.controller.handle_unlock_pdf(item=item, password=password, output_dir=output_dir)
+            if result["success"]:
+                QMessageBox.information(self, _("Unlock Success"), result["message"])
+                if result.get("output_path"):
+                    # Show unlock file path in progress label
+                    self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                    self.output_path_display.setText(output_dir)
+                    new_items = self.controller.handle_file_import([result["output_path"]])
+                    if new_items:
+                        new_items[0].unlocked_path = result.get("output_path", None)
+                        self.file_items[row_index] = new_items[0]
+                        self._populate_table_from_items()
+                return
+            else:
+                attempts -= 1
+                if attempts == 0:
+                    choice = QMessageBox.question(
+                        self, _("Unlock Failed"),
+                        _("Password incorrect. Would you like to attempt forced unlock without password?"),
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if choice == QMessageBox.Yes:
+                        output_dir = self.output_folder
+                        result = self.controller.handle_unlock_pdf(item=item, password="", output_dir=output_dir)
+                        if result["success"]:
+                            QMessageBox.information(self, _("Unlock Success"), result["message"])
+                            if result.get("output_path"):
+                                # Show unlock file path in progress label
+                                self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                                self.output_path_display.setText(output_dir)
+                                new_items = self.controller.handle_file_import([result["output_path"]])
+                                if new_items:
+                                    new_items[0].unlocked_path = result.get("output_path", None)
+                                    self.file_items[row_index] = new_items[0]
+                                    self._populate_table_from_items()
+                        else:
+                            self.show_error(_("Unlock Failed"), Exception(result["message"]))
+                    return
+                else:
+                    password, ok = QInputDialog.getText(self, _("Retry Password"), f"{item.name}\n\n{_('Incorrect password. Try again:')}")
+                    if not ok:
+                        return
 
     def _update_alignment(self, alignment: str, font_size_spin: QSpinBox, x_input: QSpinBox):
         """根据对齐方式更新X坐标（通用函数）"""
@@ -382,9 +478,11 @@ class MainWindow(QMainWindow):
         """用文件数据填充表格"""
         self.file_table.setRowCount(0)
         for idx, item in enumerate(self.file_items):
+            if not hasattr(item, "name") or not hasattr(item, "size_mb"):
+                continue
             self.file_table.insertRow(idx)
-            self.file_table.setItem(idx, 0, QTableWidgetItem(str(idx + 1)))
             name_item = QTableWidgetItem(item.name); name_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled); name_item.setToolTip(item.name)
+            self.file_table.setItem(idx, 0, QTableWidgetItem(str(idx + 1)))
             self.file_table.setItem(idx, 1, name_item)
             self.file_table.setItem(idx, 2, QTableWidgetItem(f"{item.size_mb:.2f}"))
             self.file_table.setItem(idx, 3, QTableWidgetItem(str(item.page_count)))
@@ -435,17 +533,28 @@ class MainWindow(QMainWindow):
 
     def start_processing(self):
         """开始批处理流程"""
-        if not self.file_items: QMessageBox.warning(self, _("No Files"), _("Please import PDF files first.")); return
-        if not self.output_folder: QMessageBox.warning(self, _("No Output Folder"), _("Please select an output folder.")); return
+        if not self.file_items:
+            QMessageBox.warning(self, _("No Files"), _("Please import PDF files first."))
+            return
+        if not self.output_folder:
+            QMessageBox.warning(self, _("No Output Folder"), _("Please select an output folder."))
+            return
 
-        self._set_controls_enabled(False)
+        # 先同步 file_items 的 header_text 和 footer_text
         try:
             for row in range(self.file_table.rowCount()):
                 self.file_items[row].header_text = self.file_table.item(row, 4).text()
                 self.file_items[row].footer_text = self.file_table.item(row, 5).text()
         except Exception as e:
             logger.error("Error syncing data from table", exc_info=True)
-        
+
+        # 然后再检查加密
+        if not self._check_for_encrypted_files():
+            self._set_controls_enabled(True)
+            return
+
+        self._set_controls_enabled(False)
+
         settings = self._get_current_settings()
         header_settings = {k.replace('header_', ''): v for k, v in settings.items() if k.startswith('header_')}
         footer_settings = {k.replace('footer_', ''): v for k, v in settings.items() if k.startswith('footer_')}
@@ -458,6 +567,16 @@ class MainWindow(QMainWindow):
         self.worker.signals.finished.connect(self.on_processing_finished)
         self.worker.signals.progress.connect(self.update_progress)
         self.thread.start()
+
+    def _check_for_encrypted_files(self) -> bool:
+        encrypted = [item.name for item in self.file_items if getattr(item, "encryption_status", None) != "ok"]
+        if encrypted:
+            msg = _("The following files are encrypted or restricted:") + "\n\n"
+            msg += "\n".join(f"- {name}" for name in encrypted)
+            msg += "\n\n" + _("Please unlock them using the right-click menu before processing.")
+            QMessageBox.warning(self, _("Encrypted Files Detected"), msg)
+            return False
+        return True
 
     def on_processing_finished(self, results: list):
         """处理完成后的回调函数"""
@@ -519,32 +638,57 @@ class MainWindow(QMainWindow):
         """处理导入的文件路径列表（来自对话框或拖放）"""
         try:
             new_items = self.controller.handle_file_import(paths)
-            self.file_items.extend(new_items)
+            # 只添加 PDFFileItem 类型且有 name 和 size_mb 属性的 item，防止嵌套导致后续 item.name 报错
+            self.file_items.extend([
+                item for item in new_items
+                if isinstance(item, PDFFileItem) and hasattr(item, "name") and hasattr(item, "size_mb")
+            ])
             self._populate_table_from_items()
             QTimer.singleShot(100, self._recommend_fonts)
+
+            # 新增：分析加密状态并提示
+            locked_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == "locked"]
+            restricted_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == "restricted"]
+            if locked_files or restricted_files:
+                msg = ""
+                if locked_files:
+                    msg += _("The following files are fully encrypted and require a password:\n") + "\n".join(f"• {f}" for f in locked_files) + "\n\n"
+                if restricted_files:
+                    msg += _("The following files are restricted (e.g., can't be modified):\n") + "\n".join(f"• {f}" for f in restricted_files)
+                QMessageBox.information(self, _("Encrypted Files Notice"), msg.strip())
+
         except Exception as e:
             self.show_error(_("Failed to import files"), e)
 
     def update_preview(self):
-        """更新页眉页脚位置的预览图像"""
-        pixmap = QPixmap(210, 60); pixmap.fill(Qt.white); painter = QPainter(pixmap)
+        """更新页眉页脚位置的预览图像（新版：横向长条，仅Header/Footer，分割线）"""
+        pixmap = QPixmap(600, 80)
+        pixmap.fill(Qt.white)
+        painter = QPainter(pixmap)
         settings = self._get_current_settings()
-        
+
+        # 分割线
+        painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
+        painter.drawLine(0, 40, 600, 40)
+
+        # Header 在上方
         painter.setPen(QPen(Qt.black))
         header_font_name = settings.get("header_font_name", "Helvetica")
-        if not QFont(header_font_name).exactMatch(): header_font_name = QFont().defaultFamily()
-        painter.setFont(QFont(header_font_name, settings.get("header_font_size", 9) * 0.5))
-        x = settings.get("header_x", 72) * 0.35; y = (60 - settings.get("header_y", 772) * 0.05) - 15
-        painter.drawText(int(x), int(y), "Header")
+        if not QFont(header_font_name).exactMatch():
+            header_font_name = QFont().defaultFamily()
+        painter.setFont(QFont(header_font_name, max(int(settings.get("header_font_size", 9)), 8)))
+        painter.drawText(30, 25, "Header")
 
+        # Footer 在下方
         painter.setPen(QPen(Qt.darkGray))
         footer_font_name = settings.get("footer_font_name", "Helvetica")
-        if not QFont(footer_font_name).exactMatch(): footer_font_name = QFont().defaultFamily()
-        painter.setFont(QFont(footer_font_name, settings.get("footer_font_size", 9) * 0.5))
-        fx = settings.get("footer_x", 72) * 0.35; fy = settings.get("footer_y", 40) * 0.35 + 10
-        painter.drawText(int(fx), int(fy), "Footer")
-        
-        painter.end(); self.preview_canvas.setPixmap(pixmap)
+        if not QFont(footer_font_name).exactMatch():
+            footer_font_name = QFont().defaultFamily()
+        painter.setFont(QFont(footer_font_name, max(int(settings.get("footer_font_size", 9)), 8)))
+        painter.drawText(30, 65, "Footer")
+
+        painter.end()
+        self.preview_canvas.setPixmap(pixmap)
 
     def _validate_positions(self):
         """验证Y坐标是否在打印安全区内"""
@@ -597,7 +741,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "About DocDeck",
             "DocDeck - PDF Header & Footer Tool\n"
-            "Version 1.6 (Production Refined)\n\n"
+            "Version 1.7 (Production Final)\n\n"
             "Author: 木小樨\n"
             "Project Homepage:\n"
             "https://hs2wxdogy2.feishu.cn/wiki/Kjv3wQfV5iKpGXkQ8aCcOkj6nVf"
