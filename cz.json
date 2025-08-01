@@ -1,0 +1,14 @@
+{
+  "commitizen": {
+    "name": "cz_conventional_commits",
+    "version": "1.0.5",
+    "tag_format": "v$version",
+    "version_files": [
+      "pyproject.toml:version",
+      "setup.py:version",
+      "DocDeck/__init__.py:__version__"
+    ],
+    "update_changelog_on_bump": true,
+    "changelog_file": "CHANGELOG.md"
+  }
+}
