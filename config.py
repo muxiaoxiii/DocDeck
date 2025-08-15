@@ -1,5 +1,8 @@
 from enum import Enum
 
+# === App Version ===
+APP_VERSION = "2.0.0"
+
 # === Default Output Settings ===
 DEFAULT_OUTPUT_DIR_NAME = "with header"
 DEFAULT_LANGUAGE = "zh_CN"  # zh_CN, en_US

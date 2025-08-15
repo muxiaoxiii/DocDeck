@@ -1,122 +1,47 @@
-name: Build & Release DocDeck
+#!/usr/bin/env bash
+set -euo pipefail
 
-on:
-  push:
-    tags:
-      - 'v*'
+APP_NAME="DocDeck"
+ICON_PNG="icon/docdeck.png"
+ICON_ICNS="icon/docdeck.icns"
+DMG_PATH="dist/DocDeck-macOS.dmg"
+ENTRY="main.py"
 
-jobs:
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+# Prepare icon.icns
+if [[ ! -f "$ICON_ICNS" ]]; then
+	mkdir -p icon.iconset
+	sips -z 16 16     "$ICON_PNG" --out icon.iconset/icon_16x16.png
+	sips -z 32 32     "$ICON_PNG" --out icon.iconset/icon_32x32.png
+	sips -z 128 128   "$ICON_PNG" --out icon.iconset/icon_128x128.png
+	sips -z 256 256   "$ICON_PNG" --out icon.iconset/icon_256x256.png
+	iconutil -c icns icon.iconset -o "$ICON_ICNS"
+	rm -rf icon.iconset
+fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+# Clean
+rm -rf build dist "$APP_NAME.spec"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller create-dmg
+# Build app bundle
+pyinstaller \
+	--noconfirm --clean --windowed \
+	--name "$APP_NAME" \
+	--icon "$ICON_ICNS" \
+	"$ENTRY"
 
-      - name: Convert PNG to ICNS
-        run: |
-          mkdir -p icon.iconset
-          sips -z 16 16     icon/docdeck.png --out icon.iconset/icon_16x16.png
-          sips -z 32 32     icon/docdeck.png --out icon.iconset/icon_32x32.png
-          sips -z 128 128   icon/docdeck.png --out icon.iconset/icon_128x128.png
-          sips -z 256 256   icon/docdeck.png --out icon.iconset/icon_256x256.png
-          iconutil -c icns icon.iconset -o icon/docdeck.icns
-          rm -r icon.iconset
+# Create DMG
+mkdir -p dist
+if ! command -v create-dmg >/dev/null 2>&1; then
+	pip install create-dmg >/dev/null 2>&1 || true
+fi
+create-dmg \
+	--overwrite \
+	--volname "$APP_NAME" \
+	--window-size 600 400 \
+	--icon-size 128 \
+	--icon "$APP_NAME.app" 175 120 \
+	--hide-extension "$APP_NAME.app" \
+	--app-drop-link 425 120 \
+	"$DMG_PATH" \
+	"dist/$APP_NAME/"
 
-      - name: Run macOS build script
-        run: ./build-mac.sh
-
-      - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: DocDeck-macOS-dmg
-          path: dist/DocDeck-macOS.dmg
-
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller pillow
-
-      - name: Convert PNG to ICO
-        run: |
-          python -c "from PIL import Image; Image.open('icon/docdeck.png').save('icon/docdeck.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (32,32), (16,16)])"
-
-      - name: Clean dist folder
-        run: Remove-Item -Recurse -Force dist\*
-
-      - name: Build with PyInstaller
-        run: pyinstaller --noconfirm --clean --windowed --name "DocDeck" --icon=icon/docdeck.ico main.py
-
-      - name: Package as zip
-        run: Compress-Archive -Path dist/DocDeck -DestinationPath "dist/DocDeck-Windows-${{ github.ref_name }}.zip"
-
-      - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: DocDeck-Windows-zip
-          path: "dist/DocDeck-Windows-${{ github.ref_name }}.zip"
-
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      - name: Clean dist folder
-        run: rm -rf dist/*
-
-      - name: Build with PyInstaller
-        run: pyinstaller --noconfirm --clean --windowed --name "DocDeck" --icon=icon/docdeck.png main.py
-
-      - name: Package as zip
-        run: |
-          cd dist
-          zip -r "../DocDeck-Linux-${{ github.ref_name }}.zip" "DocDeck"
-          cd ..
-          
-      - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: DocDeck-Linux-zip
-          path: "DocDeck-Linux-${{ github.ref_name }}.zip"
-
-  release:
-    needs: [build-macos, build-windows, build-linux]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write 
-    steps:
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            *.dmg
-            *.zip
+echo "DMG built at: $DMG_PATH"

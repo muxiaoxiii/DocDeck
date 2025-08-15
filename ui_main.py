@@ -777,7 +777,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "About DocDeck",
             "DocDeck - PDF Header & Footer Tool\n"
-            "Version 1.0.5 (Production Final)\n\n"
+            f"Version {__import__('config').config.APP_VERSION}\n\n"
             "Author: 木小樨\n"
             "Project Homepage:\n"
             "https://hs2wxdogy2.feishu.cn/wiki/Kjv3wQfV5iKpGXkQ8aCcOkj6nVf"
