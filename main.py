@@ -1,7 +1,6 @@
 # main.py
 import sys
 import argparse
-import os
 from PySide6.QtWidgets import QApplication
 from ui_main import MainWindow
 from logger import logger

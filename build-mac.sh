@@ -28,20 +28,25 @@ pyinstaller \
 	--icon "$ICON_ICNS" \
 	"$ENTRY"
 
-# Create DMG
+# Create DMG (prefer create-dmg, fallback to hdiutil)
 mkdir -p dist
-if ! command -v create-dmg >/dev/null 2>&1; then
-	pip install create-dmg >/dev/null 2>&1 || true
+APP_BUNDLE="dist/$APP_NAME.app"
+if [[ ! -d "$APP_BUNDLE" && -d "dist/$APP_NAME/$APP_NAME.app" ]]; then
+	APP_BUNDLE="dist/$APP_NAME/$APP_NAME.app"
 fi
-create-dmg \
-	--overwrite \
-	--volname "$APP_NAME" \
-	--window-size 600 400 \
-	--icon-size 128 \
-	--icon "$APP_NAME.app" 175 120 \
-	--hide-extension "$APP_NAME.app" \
-	--app-drop-link 425 120 \
-	"$DMG_PATH" \
-	"dist/$APP_NAME/"
+if command -v create-dmg >/dev/null 2>&1; then
+	create-dmg \
+		--overwrite \
+		--volname "$APP_NAME" \
+		--window-size 600 400 \
+		--icon-size 128 \
+		--icon "$APP_NAME.app" 175 120 \
+		--hide-extension "$APP_NAME.app" \
+		--app-drop-link 425 120 \
+		"$DMG_PATH" \
+		"$APP_BUNDLE"
+else
+	hdiutil create -volname "$APP_NAME" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$DMG_PATH"
+fi
 
 echo "DMG built at: $DMG_PATH"
