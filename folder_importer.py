@@ -42,7 +42,7 @@ def filter_pdf_files(paths, include_hidden=False, sort_by_mtime=False):
                 continue
             all_pdfs.append(path)
         elif os.path.isdir(path):
-            all_pdfs.extend(import_from_folder(path, include_hidden=include_hidden, sort_by_mtime=False))
+            all_pdfs.extend(import_from_folder(path, include_hidden=include_hidden, sort_by_mtime=sort_by_mtime))
 
     if sort_by_mtime:
         all_pdfs.sort(key=lambda x: os.path.getmtime(x))

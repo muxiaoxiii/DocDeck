@@ -12,6 +12,7 @@ from pdf_utils import get_pdf_file_size_mb, get_pdf_page_count
 from pdf_handler import process_pdfs_in_batch
 from logger import logger
 from font_manager import get_recommended_fonts
+from config import DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE, DEFAULT_HEADER_Y, DEFAULT_FOOTER_Y
 
 class ProcessingController:
     def __init__(self, view=None):
@@ -136,9 +137,45 @@ class ProcessingController:
             logger.error(f"Unlock failed for {item.path}: {e}", exc_info=True)
             return {"success": False, "status": "ERROR", "message": str(e), "method": "Exception", "output_path": None}
 
-class Worker(QObject):
-    signals = Signal(list)
+    def handle_cli_batch_process(self, sources: List[str], output_dir: str):
+        """
+        CLI 批处理入口：展开输入源为 PDF 列表，按默认设置进行处理。
+        """
+        try:
+            pdf_paths = filter_pdf_files(sources)
+            if not pdf_paths:
+                logger.error("未找到任何 PDF 文件用于处理。")
+                return []
 
+            file_items = self.handle_file_import(pdf_paths)
+
+            header_settings = {
+                "font_name": DEFAULT_FONT_NAME,
+                "font_size": DEFAULT_FONT_SIZE,
+                "x": 72,
+                "y": DEFAULT_HEADER_Y,
+            }
+            footer_settings = {
+                "font_name": DEFAULT_FONT_NAME,
+                "font_size": DEFAULT_FONT_SIZE,
+                "x": 72,
+                "y": DEFAULT_FOOTER_Y,
+            }
+
+            results = self.handle_batch_process(
+                file_items=file_items,
+                output_dir=output_dir,
+                header_settings=header_settings,
+                footer_settings=footer_settings,
+                signals=None,
+            )
+            return results
+        except Exception as e:
+            logger.error(f"CLI 批处理失败: {e}", exc_info=True)
+            return []
+
+class Worker(QObject):
+    
     def __init__(self, controller, file_items, output_dir, header_settings, footer_settings):
         super().__init__()
         self.controller = controller
