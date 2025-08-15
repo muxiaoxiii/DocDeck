@@ -2,7 +2,7 @@
 import os
 import pathlib
 from typing import Dict, Any
-from models import PDFFileItem
+from models import PDFFileItem, EncryptionStatus
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QFileDialog, QMessageBox, QTableWidget,
     QTableWidgetItem, QLabel, QHBoxLayout, QHeaderView, QComboBox, QSpinBox, QCheckBox,
@@ -156,6 +156,11 @@ class MainWindow(QMainWindow):
         preview_group.addWidget(preview_label)
         preview_group.addWidget(self.preview_canvas)
 
+        # 结构化模式开关
+        self.structured_checkbox = QCheckBox(_("Structured mode (Acrobat-friendly)"))
+        self.structured_checkbox.setChecked(False)
+        grid.addWidget(self.structured_checkbox, 7, 0, 1, 3)
+
         # 横向布局：设置控件 + 预览
         horizontal_layout = QHBoxLayout()
         horizontal_layout.addLayout(grid, 3)
@@ -173,6 +178,9 @@ class MainWindow(QMainWindow):
         self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.file_table.setEditTriggers(QTableWidget.DoubleClicked)
+        # 表格编辑或选择变化时，实时刷新预览
+        self.file_table.itemChanged.connect(lambda *_: self.update_preview())
+        self.file_table.itemSelectionChanged.connect(self.update_preview)
         self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
         
         controls_layout = QVBoxLayout()
@@ -230,7 +238,8 @@ class MainWindow(QMainWindow):
             "header_x": self.x_input, "header_y": self.y_input,
             "footer_font_name": self.footer_font_select, "footer_font_size": self.footer_font_size_spin,
             "footer_x": self.footer_x_input, "footer_y": self.footer_y_input,
-            "merge": self.merge_checkbox, "page_numbering": self.page_number_checkbox
+            "merge": self.merge_checkbox, "page_numbering": self.page_number_checkbox,
+            "structured": self.structured_checkbox,
         }
 
     def _connect_signals(self):
@@ -259,18 +268,19 @@ class MainWindow(QMainWindow):
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input]
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
-            else: control.valueChanged.connect(self.update_preview)
+            else:
+                if hasattr(control, 'valueChanged'):
+                    control.valueChanged.connect(self.update_preview)
+                elif hasattr(control, 'stateChanged'):
+                    control.stateChanged.connect(self.update_preview)
         
         validation_controls = [self.y_input, self.footer_y_input]
         for control in validation_controls:
             control.valueChanged.connect(self.update_preview)
             control.valueChanged.connect(self._validate_positions)
-        # 新增: 监听Y坐标变化以更新预览
-        for control in validation_controls:
-            control.valueChanged.connect(self.update_preview)
 
         self.font_select.currentTextChanged.connect(self._on_font_changed)
         self.footer_font_select.currentTextChanged.connect(self._on_font_changed)
@@ -558,6 +568,10 @@ class MainWindow(QMainWindow):
         settings = self._get_current_settings()
         header_settings = {k.replace('header_', ''): v for k, v in settings.items() if k.startswith('header_')}
         footer_settings = {k.replace('footer_', ''): v for k, v in settings.items() if k.startswith('footer_')}
+        # 传递结构化模式参数
+        if settings.get('structured'):
+            header_settings['structured'] = True
+            footer_settings['structured'] = True
 
         self.progress_label.setText(_("Processing... (0%)"))
         self.thread = QThread()
@@ -567,9 +581,11 @@ class MainWindow(QMainWindow):
         self.worker.signals.finished.connect(self.on_processing_finished)
         self.worker.signals.progress.connect(self.update_progress)
         self.thread.start()
+        # 启动时刷新一次预览，确保 UI 有反馈
+        QTimer.singleShot(0, self.update_preview)
 
     def _check_for_encrypted_files(self) -> bool:
-        encrypted = [item.name for item in self.file_items if getattr(item, "encryption_status", None) != "ok"]
+        encrypted = [item.name for item in self.file_items if getattr(item, "encryption_status", None) != EncryptionStatus.OK]
         if encrypted:
             msg = _("The following files are encrypted or restricted:") + "\n\n"
             msg += "\n".join(f"- {name}" for name in encrypted)
@@ -647,8 +663,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(100, self._recommend_fonts)
 
             # 新增：分析加密状态并提示
-            locked_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == "locked"]
-            restricted_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == "restricted"]
+            locked_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == EncryptionStatus.LOCKED]
+            restricted_files = [item.name for item in new_items if isinstance(item, PDFFileItem) and getattr(item, "encryption_status", None) == EncryptionStatus.RESTRICTED]
             if locked_files or restricted_files:
                 msg = ""
                 if locked_files:
@@ -661,31 +677,51 @@ class MainWindow(QMainWindow):
             self.show_error(_("Failed to import files"), e)
 
     def update_preview(self):
-        """更新页眉页脚位置的预览图像（新版：横向长条，仅Header/Footer，分割线）"""
-        pixmap = QPixmap(600, 80)
+        """更新页眉页脚位置的预览图像（横向长条：显示 Header/Footer 文本与大致 X 位置提示）"""
+        width, height = 600, 80
+        pixmap = QPixmap(width, height)
         pixmap.fill(Qt.white)
         painter = QPainter(pixmap)
         settings = self._get_current_settings()
 
         # 分割线
         painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
-        painter.drawLine(0, 40, 600, 40)
+        painter.drawLine(0, height // 2, width, height // 2)
+
+        # 取当前选中行的 header/footer 文本（若无选中则示例文案）
+        header_text = "Header"
+        footer_text = "Footer"
+        current_row = self.file_table.currentRow()
+        if current_row >= 0:
+            try:
+                header_item = self.file_table.item(current_row, 4)
+                footer_item = self.file_table.item(current_row, 5)
+                if header_item and header_item.text():
+                    header_text = header_item.text()
+                if footer_item and footer_item.text():
+                    footer_text = footer_item.text()
+            except Exception:
+                pass
 
         # Header 在上方
         painter.setPen(QPen(Qt.black))
         header_font_name = settings.get("header_font_name", "Helvetica")
         if not QFont(header_font_name).exactMatch():
             header_font_name = QFont().defaultFamily()
-        painter.setFont(QFont(header_font_name, max(int(settings.get("header_font_size", 9)), 8)))
-        painter.drawText(30, 25, "Header")
+        header_font_size = max(int(settings.get("header_font_size", 9)), 8)
+        painter.setFont(QFont(header_font_name, header_font_size))
+        header_x = max(int(settings.get("header_x", 72)) // 4, 10)  # 简化：将 pt 映射到小画布像素
+        painter.drawText(header_x, height // 2 - 15, header_text[:40])
 
         # Footer 在下方
         painter.setPen(QPen(Qt.darkGray))
         footer_font_name = settings.get("footer_font_name", "Helvetica")
         if not QFont(footer_font_name).exactMatch():
             footer_font_name = QFont().defaultFamily()
-        painter.setFont(QFont(footer_font_name, max(int(settings.get("footer_font_size", 9)), 8)))
-        painter.drawText(30, 65, "Footer")
+        footer_font_size = max(int(settings.get("footer_font_size", 9)), 8)
+        painter.setFont(QFont(footer_font_name, footer_font_size))
+        footer_x = max(int(settings.get("footer_x", 72)) // 4, 10)
+        painter.drawText(footer_x, height // 2 + 25, footer_text[:40])
 
         painter.end()
         self.preview_canvas.setPixmap(pixmap)
