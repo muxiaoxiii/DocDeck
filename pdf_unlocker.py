@@ -1,141 +1,102 @@
-"""
-pdf_unlocker.py
-
-Provides a unified interface for unlocking password-protected PDF files
-using PikePDF (structural removal) or PyPDF2 (page reconstruction).
-"""
-
-import pikepdf
-from pikepdf import PasswordError as PikePasswordError
-from PyPDF2 import PdfReader, PdfWriter
-from PyPDF2.errors import DependencyError as PyPDF2DependencyError
+import fitz  # PyMuPDF
 from typing import Optional, TypedDict
 
-from logger import logger
+# 使用您项目中统一的logger实例
+from logger import logger, log_and_display_error
 
-class WrongPasswordError(Exception): pass
+class WrongPasswordError(Exception):
+    """当提供的密码不正确时引发的自定义异常。"""
+    pass
 
 class UnlockResult(TypedDict):
+    """定义解锁函数返回值的类型。"""
     success: bool
     message: str
     method: str
     output_path: Optional[str]
 
-# --- Strategy 1: Use PikePDF for high-fidelity structural unlocking ---
-def _unlock_with_pikepdf(input_path: str, output_path: str, password: str) -> tuple[bool, str]:
-    """
-    Attempt to unlock a PDF using PikePDF by structurally removing encryption.
-
-    Args:
-        input_path (str): Path to the encrypted PDF.
-        output_path (str): Destination for the unlocked PDF.
-        password (str): Password for decryption.
-
-    Returns:
-        tuple[bool, str]: (success status, message)
-    """
-    try:
-        # Attempt to open and save PDF without the encryption dictionary
-        with pikepdf.open(input_path, password=password) as pdf:
-            pdf.save(output_path)
-        return True, "成功：已通过高保真模式移除限制。"
-    except PikePasswordError:
-        raise
-    except Exception as e:
-        logger.error(f"[PikePDF] 解密失败 ({input_path})，准备尝试备用方法。错误类型: {type(e).__name__}, 错误: {e}", exc_info=True)
-        return False, f"PikePDF 失败: {e}"
-
-# --- Strategy 2: Use PyPDF2 for fallback page-level reconstruction ---
-def _unlock_with_pypdf2(input_path: str, output_path: str, password: str) -> tuple[bool, str]:
-    """
-    Attempt to unlock a PDF using PyPDF2 by reconstructing the content.
-
-    Args:
-        input_path (str): Path to the encrypted PDF.
-        output_path (str): Destination for the rebuilt PDF.
-        password (str): Password for decryption.
-
-    Returns:
-        tuple[bool, str]: (success status, message)
-    """
-    try:
-        reader = PdfReader(input_path)
-        if reader.is_encrypted:
-            if not reader.decrypt(password):
-                raise WrongPasswordError("密码错误")
-
-        # Rebuild document without encryption
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-
-        with open(output_path, "wb") as f:
-            writer.write(f)
-        
-        return True, "成功：已通过备用模式移除限制（书签等可能丢失）。"
-    except WrongPasswordError as e:
-        raise
-    except Exception as e:
-        logger.error(f"[PyPDF2] 备用解密失败 ({input_path})。错误类型: {type(e).__name__}, 错误: {e}", exc_info=True)
-        return False, f"PyPDF2 失败: {e}"
-
-# --- Unified unlocking interface exposed to external callers ---
 def unlock_pdf(input_path: str, output_path: str, password: str = '') -> UnlockResult:
     """
-    Attempt to unlock a PDF using PikePDF (preferred) or PyPDF2 (fallback).
-    Returns a dictionary describing the outcome.
+    尝试使用PyMuPDF解锁PDF文件并移除其所有限制。
+
+    该函数能处理两种情况：
+    1.  限制编辑的PDF (有所有者密码): 默认使用空密码('')尝试移除限制。
+    2.  限制查看的PDF (有用户密码): 需要提供正确的密码才能解锁。
+
+    成功解锁后，生成的新PDF文件将没有任何密码。
+
+    参数:
+        input_path (str): 输入PDF的路径。
+        output_path (str): 输出解锁后PDF的路径。
+        password (str): 解锁密码。对于仅限制编辑的PDF，此项可留空。
+
+    返回:
+        UnlockResult: 包含解锁结果的字典。
     """
+    doc = None # 在try外部初始化doc变量，确保finally块可以访问
     if not output_path:
+        logger.warning("未提供有效的输出文件路径。")
         return {
             "success": False,
             "message": "未指定输出路径。",
             "method": "失败",
             "output_path": None
         }
+
     try:
-        # Preferred method: PikePDF for high-fidelity unlocking
-        success, message = _unlock_with_pikepdf(input_path, output_path, password)
-        if success:
-            return {
-                "success": True,
-                "message": message,
-                "method": "PikePDF (高保真)",
-                "output_path": output_path
-            }
+        # 打开PDF文件
+        doc = fitz.open(input_path)
 
-        # If PikePDF fails (non-password), fallback to PyPDF2
-        logger.info(f"[Unlocker] '{input_path}' 的高保真解密失败，尝试备用方法...")
-        success, message = _unlock_with_pypdf2(input_path, output_path, password)
-        if success:
-            return {
-                "success": True,
-                "message": message,
-                "method": "PyPDF2 (备用)",
-                "output_path": output_path
-            }
+        # 检查PDF是否加密。如果是，则尝试验证密码。
+        if doc.is_encrypted:
+            logger.info(f"文件 '{input_path}' 已加密，尝试解锁...")
 
-        # Both strategies failed
+            # 使用提供的密码进行验证。
+            if not doc.authenticate(password):
+                # 如果验证失败，说明密码错误或缺失。
+                raise WrongPasswordError("提供的密码不正确或缺失。")
+
+            logger.info(f"成功解锁文件: '{input_path}'")
+        else:
+            logger.info(f"文件 '{input_path}' 未加密，将直接进行保存。")
+
+        # 保存文档。PyMuPDF的save方法会自动移除加密。
+        doc.save(output_path)
+        
+        logger.info(f"文件 '{input_path}' 成功处理，输出保存到: {output_path}")
+        
+        return {
+            "success": True,
+            "message": "PDF处理成功，所有限制已移除。",
+            "method": "PyMuPDF",
+            "output_path": output_path
+        }
+
+    except WrongPasswordError as e:
+        msg = f"解锁失败: {input_path}。原因: {e}"
+        log_and_display_error(msg) # 直接调用，不接收返回值
         return {
             "success": False,
-            "message": f"所有解密方法均失败。最后错误: {message}",
+            "message": str(e),
             "method": "失败",
             "output_path": None
         }
 
-    except (PikePasswordError, WrongPasswordError):
-        msg = "密码错误或缺失。需要提供正确的密码才能打开此文件。"
-        logger.warning(f"[Unlocker] '{input_path}' 解密失败: {msg}")
-        return {
-            "success": False,
-            "message": msg,
-            "method": "失败",
-            "output_path": None
-        }
     except Exception as e:
-        logger.error(f"[Unlocker] '{input_path}' 解密过程中发生未知顶层错误: {type(e).__name__}: {e}", exc_info=True)
+        msg = f"处理文件时发生未知错误: {input_path}。"
+        log_and_display_error(msg, exception=e) # 直接调用，不接收返回值
         return {
             "success": False,
             "message": f"发生未知错误: {e}",
             "method": "失败",
             "output_path": None
         }
+    
+    finally:
+        # 确保文档对象在使用后被关闭
+        if doc:
+            try:
+                doc.close()
+                logger.debug(f"成功关闭文档: {input_path}") # 关闭日志级别可以设为DEBUG
+            except Exception as close_error:
+                logger.error(f"关闭文档 '{input_path}' 时发生错误: {close_error}")
