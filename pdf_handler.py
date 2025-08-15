@@ -13,6 +13,7 @@ from logger import logger
 import pikepdf
 from pikepdf import Name, Dictionary
 from pdf_utils import register_font_safely
+from font_manager import suggest_chinese_fallback_font
 
 class WorkerSignals(QObject):
     progress = Signal(int, int, str)
@@ -322,7 +323,8 @@ def process_pdfs_in_batch(
                                     float(header_settings.get("y", 752)),
                                     subtype='Header', base_font=header_base)
                             else:
-                                ov_bytes = _build_overlay_pdf_bytes(w, h, item.header_text, header_settings.get("font_name"), int(header_settings.get("font_size", 9)), float(header_settings.get("x", 72)), float(header_settings.get("y", 752)))
+                                cn_font = header_settings.get("structured_cn_font") if header_settings.get("structured_cn_fixed") else suggest_chinese_fallback_font(header_settings.get("font_name"))
+                                ov_bytes = _build_overlay_pdf_bytes(w, h, item.header_text, cn_font, int(header_settings.get("font_size", 9)), float(header_settings.get("x", 72)), float(header_settings.get("y", 752)))
                                 _add_marked_form_overlay(pdf, page, ov_bytes, 'Header', w, h)
                         if item.footer_text:
                             footer_text = (item.footer_text or "").format(page=i + 1, total=page_total)
@@ -334,7 +336,8 @@ def process_pdfs_in_batch(
                                     float(footer_settings.get("y", 40)),
                                     subtype='Footer', base_font=footer_base)
                             else:
-                                ov_bytes = _build_overlay_pdf_bytes(w, h, footer_text, footer_settings.get("font_name"), int(footer_settings.get("font_size", 9)), float(footer_settings.get("x", 72)), float(footer_settings.get("y", 40)))
+                                cn_font_f = footer_settings.get("structured_cn_font") if footer_settings.get("structured_cn_fixed") else suggest_chinese_fallback_font(footer_settings.get("font_name"))
+                                ov_bytes = _build_overlay_pdf_bytes(w, h, footer_text, cn_font_f, int(footer_settings.get("font_size", 9)), float(footer_settings.get("x", 72)), float(footer_settings.get("y", 40)))
                                 _add_marked_form_overlay(pdf, page, ov_bytes, 'Footer', w, h)
                     output_name = get_unique_filename(output_dir, f"{os.path.splitext(item.name)[0]}_processed.pdf")
                     output_path = os.path.join(output_dir, output_name)

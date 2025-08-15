@@ -1,7 +1,7 @@
 from enum import Enum
 
 # === App Version ===
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.2"
 
 # === Default Output Settings ===
 DEFAULT_OUTPUT_DIR_NAME = "with header"

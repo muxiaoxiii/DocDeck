@@ -119,17 +119,17 @@ class MainWindow(QMainWindow):
         
         self.font_select = QComboBox(); self.font_select.addItems(get_system_fonts())
         self.footer_font_select = QComboBox(); self.footer_font_select.addItems(get_system_fonts())
-        self.font_size_spin = QSpinBox(); self.font_size_spin.setRange(6, 72); self.font_size_spin.setValue(9)
-        self.footer_font_size_spin = QSpinBox(); self.footer_font_size_spin.setRange(6, 72); self.footer_font_size_spin.setValue(9)
+        self.font_size_spin = QSpinBox(); self.font_size_spin.setRange(6, 72); self.font_size_spin.setValue(14)
+        self.footer_font_size_spin = QSpinBox(); self.footer_font_size_spin.setRange(6, 72); self.footer_font_size_spin.setValue(14)
         grid.addWidget(QLabel(_("Font:")), 1, 0, Qt.AlignRight); grid.addWidget(self.font_select, 1, 1); grid.addWidget(self.footer_font_select, 1, 2)
         grid.addWidget(QLabel(_("Size:")), 2, 0, Qt.AlignRight); grid.addWidget(self.font_size_spin, 2, 1); grid.addWidget(self.footer_font_size_spin, 2, 2)
         
-        self.x_input = QSpinBox(); self.x_input.setRange(0, 1000); self.x_input.setValue(72)
-        self.footer_x_input = QSpinBox(); self.footer_x_input.setRange(0, 1000); self.footer_x_input.setValue(72)
-        self.y_input = QSpinBox(); self.y_input.setRange(0, 1000); self.y_input.setValue(suggest_safe_header_y())
+        self.x_input = QSpinBox(); self.x_input.setRange(0, 1000); self.x_input.setValue(21)  # 0.3cm ≈ 8.5pt，取约 21pt 右侧对齐时会用到按钮调整
+        self.footer_x_input = QSpinBox(); self.footer_x_input.setRange(0, 1000); self.footer_x_input.setValue(21)
+        self.y_input = QSpinBox(); self.y_input.setRange(0, 1000); self.y_input.setValue(int(28.35))  # 0.8cm≈22.7pt，考虑安全边距取约 28pt
         self.header_y_warning_label = self._create_warning_label()
         header_y_layout = QHBoxLayout(); header_y_layout.addWidget(self.y_input); header_y_layout.addWidget(self.header_y_warning_label)
-        self.footer_y_input = QSpinBox(); self.footer_y_input.setRange(0, 1000); self.footer_y_input.setValue(40)
+        self.footer_y_input = QSpinBox(); self.footer_y_input.setRange(0, 1000); self.footer_y_input.setValue(int(28.35))
         self.footer_y_warning_label = self._create_warning_label()
         footer_y_layout = QHBoxLayout(); footer_y_layout.addWidget(self.footer_y_input); footer_y_layout.addWidget(self.footer_y_warning_label)
         grid.addWidget(QLabel(_("X Position:")), 3, 0, Qt.AlignRight); grid.addWidget(self.x_input, 3, 1); grid.addWidget(self.footer_x_input, 3, 2)
@@ -160,6 +160,13 @@ class MainWindow(QMainWindow):
         self.structured_checkbox = QCheckBox(_("Structured mode (Acrobat-friendly)"))
         self.structured_checkbox.setChecked(False)
         grid.addWidget(self.structured_checkbox, 7, 0, 1, 3)
+
+        # 结构化中文选项
+        self.struct_cn_fixed_checkbox = QCheckBox(_("Structured CN: use fixed font"))
+        self.struct_cn_fixed_checkbox.setChecked(False)
+        self.struct_cn_font_combo = QComboBox(); self.struct_cn_font_combo.addItems(get_system_fonts())
+        grid.addWidget(self.struct_cn_fixed_checkbox, 8, 0, 1, 1)
+        grid.addWidget(self.struct_cn_font_combo, 8, 1, 1, 2)
 
         # 横向布局：设置控件 + 预览
         horizontal_layout = QHBoxLayout()
@@ -244,6 +251,8 @@ class MainWindow(QMainWindow):
             "merge": self.merge_checkbox, "page_numbering": self.page_number_checkbox,
             "structured": self.structured_checkbox,
             "normalize_a4": self.normalize_a4_checkbox,
+            "structured_cn_fixed": self.struct_cn_fixed_checkbox,
+            "structured_cn_font": self.struct_cn_font_combo,
         }
 
     def _connect_signals(self):
@@ -272,7 +281,7 @@ class MainWindow(QMainWindow):
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox]
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox, self.struct_cn_fixed_checkbox, self.struct_cn_font_combo]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
             else:
@@ -572,10 +581,15 @@ class MainWindow(QMainWindow):
         settings = self._get_current_settings()
         header_settings = {k.replace('header_', ''): v for k, v in settings.items() if k.startswith('header_')}
         footer_settings = {k.replace('footer_', ''): v for k, v in settings.items() if k.startswith('footer_')}
-        # 传递结构化模式 & A4 规范化
+        # 传递结构化模式 & A4 规范化 & 中文结构化选项
         if settings.get('structured'):
             header_settings['structured'] = True
             footer_settings['structured'] = True
+            if settings.get('structured_cn_fixed'):
+                header_settings['structured_cn_fixed'] = True
+                footer_settings['structured_cn_fixed'] = True
+                header_settings['structured_cn_font'] = settings.get('structured_cn_font')
+                footer_settings['structured_cn_font'] = settings.get('structured_cn_font')
         if settings.get('normalize_a4', True):
             header_settings['normalize_a4'] = True
             footer_settings['normalize_a4'] = True
@@ -730,9 +744,9 @@ class MainWindow(QMainWindow):
         painter.setPen(QPen(Qt.black))
         header_font_name = settings.get("header_font_name", "Helvetica")
         if not QFont(header_font_name).exactMatch(): header_font_name = QFont().defaultFamily()
-        header_font_size = max(int(settings.get("header_font_size", 9)), 8)
+        header_font_size = max(int(settings.get("header_font_size", 14)), 8)
         painter.setFont(QFont(header_font_name, header_font_size))
-        header_x_pt = int(settings.get("header_x", 72))
+        header_x_pt = int(settings.get("header_x", 21))
         header_x = max(int(header_x_pt * scale_x), 10)
         painter.drawText(header_x, height // 2 - 15, header_text[:40])
         
@@ -740,9 +754,9 @@ class MainWindow(QMainWindow):
         painter.setPen(QPen(Qt.darkGray))
         footer_font_name = settings.get("footer_font_name", "Helvetica")
         if not QFont(footer_font_name).exactMatch(): footer_font_name = QFont().defaultFamily()
-        footer_font_size = max(int(settings.get("footer_font_size", 9)), 8)
+        footer_font_size = max(int(settings.get("footer_font_size", 14)), 8)
         painter.setFont(QFont(footer_font_name, footer_font_size))
-        footer_x_pt = int(settings.get("footer_x", 72))
+        footer_x_pt = int(settings.get("footer_x", 21))
         footer_x = max(int(footer_x_pt * scale_x), 10)
         painter.drawText(footer_x, height // 2 + 25, footer_text[:40])
         
