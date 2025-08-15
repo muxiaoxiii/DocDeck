@@ -20,11 +20,15 @@ jobs:
           pip install pyinstaller
       - name: Build macOS DMG
         run: bash ./build-mac.sh
+      - name: Rename macOS artifact with version
+        run: |
+          mkdir -p release
+          cp dist/DocDeck-macOS.dmg release/DocDeck-macOS-${{ github.ref_name }}.dmg
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: DocDeck-macOS-dmg
-          path: dist/DocDeck-macOS.dmg
+          path: release/DocDeck-macOS-${{ github.ref_name }}.dmg
 
   build-windows:
     runs-on: windows-latest
@@ -95,6 +99,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/**/DocDeck-macOS.dmg
+            artifacts/**/DocDeck-macOS-*.dmg
             artifacts/**/DocDeck-Windows-*.zip
             artifacts/**/DocDeck-Linux-*.zip 
