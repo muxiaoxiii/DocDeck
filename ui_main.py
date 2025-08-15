@@ -9,7 +9,11 @@ from PySide6.QtWidgets import (
     QGroupBox, QGridLayout, QLineEdit, QMenu, QInputDialog
 )
 from PySide6.QtCore import Qt, QCoreApplication, QThread, QTimer
-from PySide6.QtGui import QPainter, QPen, QFont, QPixmap
+from PySide6.QtGui import QPainter, QPen, QFont, QPixmap, QImage
+try:
+	import fitz  # PyMuPDF
+except ImportError:
+	fitz = None
 
 from controller import ProcessingController, Worker
 from font_manager import get_system_fonts
@@ -151,9 +155,13 @@ class MainWindow(QMainWindow):
         # 新：预览区域横向长条，仅Header/Footer
         preview_group = QVBoxLayout()
         preview_label = QLabel(_("Header/Footer Preview")); preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(600, 80)
+        self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(600, 360)
         self.preview_canvas.setStyleSheet("background: white; border: 1px solid #ccc;")
+        page_sel_layout = QHBoxLayout(); page_sel_layout.addWidget(QLabel(_("Page: ")))
+        self.preview_page_spin = QSpinBox(); self.preview_page_spin.setRange(1, 9999); self.preview_page_spin.setValue(1)
+        page_sel_layout.addWidget(self.preview_page_spin); page_sel_layout.addStretch()
         preview_group.addWidget(preview_label)
+        preview_group.addLayout(page_sel_layout)
         preview_group.addWidget(self.preview_canvas)
 
         # 结构化模式开关
@@ -188,7 +196,25 @@ class MainWindow(QMainWindow):
         # 表格编辑或选择变化时，实时刷新预览
         self.file_table.itemChanged.connect(lambda *_: self.update_preview())
         self.file_table.itemSelectionChanged.connect(self.update_preview)
-        self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        # 在文件表格设置后添加右键菜单
+        self._setup_context_menu()
+        
+        # 预设按钮布局
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel(_("预设位置:")))
+        
+        # 右上角预设按钮
+        self.top_right_btn = QPushButton(_("右上角"))
+        self.top_right_btn.clicked.connect(self._apply_top_right_preset)
+        preset_layout.addWidget(self.top_right_btn)
+        
+        # 右下角预设按钮  
+        self.bottom_right_btn = QPushButton(_("右下角"))
+        self.bottom_right_btn.clicked.connect(self._apply_bottom_right_preset)
+        preset_layout.addWidget(self.bottom_right_btn)
+        
+        preset_layout.addStretch()
+        main_layout.addLayout(preset_layout)
         
         controls_layout = QVBoxLayout()
         self.move_up_button = QPushButton(_("Move Up"))
@@ -274,14 +300,14 @@ class MainWindow(QMainWindow):
         self.remove_button.clicked.connect(self.remove_selected_items)
 
         self.mode_select_combo.currentIndexChanged.connect(self.header_mode_changed)
-        self.file_table.customContextMenuRequested.connect(self._show_context_menu)
+        # self.file_table.customContextMenuRequested.connect(self._show_context_menu) # This line is now handled by _setup_context_menu
         
         auto_number_controls = [self.prefix_input, self.suffix_input, self.start_spin, self.step_spin, self.digits_spin]
         for control in auto_number_controls:
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox, self.struct_cn_fixed_checkbox, self.struct_cn_font_combo]
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox, self.struct_cn_fixed_checkbox, self.struct_cn_font_combo, self.preview_page_spin]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
             else:
@@ -698,70 +724,63 @@ class MainWindow(QMainWindow):
             self.show_error(_("Failed to import files"), e)
 
     def update_preview(self):
-        """更新页眉页脚位置的预览图像（横向长条：显示 Header/Footer 文本与大致 X 位置提示）"""
-        width, height = 600, 80
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.white)
-        painter = QPainter(pixmap)
-        settings = self._get_current_settings()
-
-        # 页面缩放：若选中行存在文件，尝试读取其第一页尺寸以更准确映射到预览
-        page_width_pt, page_height_pt = 612, 792  # 默认 Letter
+        """真实渲染选中页背景，并叠加页眉/页脚；检测与文本块重叠并高亮"""
+        row = self.file_table.currentRow()
+        if row < 0 or row >= len(self.file_items) or fitz is None:
+            # fallback 到旧预览（简化处理）
+            pixmap = QPixmap(600, 360); pixmap.fill(Qt.white)
+            p = QPainter(pixmap); p.setPen(QPen(Qt.gray)); p.drawText(20, 40, _("No preview")); p.end()
+            self.preview_canvas.setPixmap(pixmap); return
         try:
-            row = self.file_table.currentRow()
-            if row >= 0 and row < len(self.file_items):
-                from PyPDF2 import PdfReader
-                reader = PdfReader(self.file_items[row].path)
-                mb = reader.pages[0].mediabox
-                page_width_pt = int(float(mb.width))
-                page_height_pt = int(float(mb.height))
+            path = self.file_items[row].path
+            doc = fitz.open(path)
+            page_index = max(0, min(self.preview_page_spin.value()-1, len(doc)-1))
+            page = doc[page_index]
+            mat = fitz.Matrix(1.2, 1.2)  # 放大一点
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+            canvas = QPixmap.fromImage(img.copy())
+            p = QPainter(canvas)
+            settings = self._get_current_settings()
+            # 文本
+            header_text = self.file_table.item(row, 4).text() if self.file_table.item(row, 4) else ""
+            footer_text = self.file_table.item(row, 5).text() if self.file_table.item(row, 5) else ""
+            # 坐标缩放（pt -> 设备像素）
+            page_w_pt = page.rect.width; scale_x = canvas.width() / max(page_w_pt, 1)
+            header_x = int(int(settings.get("header_x", 21)) * scale_x)
+            footer_x = int(int(settings.get("footer_x", 21)) * scale_x)
+            # Y 直接用 pt 比例近似（高略有偏差可接受）
+            header_y = int((page.rect.height - int(settings.get("header_y", 28))) * (canvas.height() / page.rect.height))
+            footer_y = int(int(settings.get("footer_y", 28)) * (canvas.height() / page.rect.height))
+            # 绘制文本
+            p.setPen(QPen(Qt.black))
+            p.setFont(QFont(settings.get("header_font_name", "Helvetica"), max(int(settings.get("header_font_size", 14)), 8)))
+            p.drawText(header_x, max(20, header_y), header_text[:60])
+            p.setPen(QPen(Qt.darkGray))
+            p.setFont(QFont(settings.get("footer_font_name", "Helvetica"), max(int(settings.get("footer_font_size", 14)), 8)))
+            p.drawText(footer_x, min(canvas.height()-20, canvas.height()-footer_y), footer_text[:60])
+            # 遮挡检测：扫描页 spans bbox 与 header/footer 近邻区域相交则高亮
+            p.setPen(QPen(Qt.red, 2, Qt.SolidLine))
+            spans = page.get_text("dict").get("blocks", [])
+            def _overlap(r1, r2):
+                return not (r1[2] < r2[0] or r2[2] < r1[0] or r1[3] < r2[1] or r2[3] < r1[1])
+            # 构造大致的 header/footer 区域（像素）
+            h_box = (header_x, max(0, header_y-20), min(canvas.width(), header_x+300), header_y+10)
+            f_box = (footer_x, canvas.height()-footer_y-10, min(canvas.width(), footer_x+300), canvas.height()-footer_y+20)
+            for blk in spans:
+                for line in blk.get("lines", []):
+                    for sp in line.get("spans", []):
+                        x0, y0, x1, y1 = sp["bbox"]
+                        # 转像素
+                        r = (int(x0*scale_x), int(y0*(canvas.height()/page.rect.height)), int(x1*scale_x), int(y1*(canvas.height()/page.rect.height)))
+                        if _overlap(r, h_box) or _overlap(r, f_box):
+                            p.drawRect(*r)
+            p.end()
+            self.preview_canvas.setPixmap(canvas)
         except Exception:
-            pass
-        # 将 pt 映射到 600px 宽度
-        width, height = 600, 80
-        scale_x = max(width / max(page_width_pt, 1), 0.05)
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.white)
-        painter = QPainter(pixmap)
-        
-        # 分割线
-        painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
-        painter.drawLine(0, height // 2, width, height // 2)
-        
-        # 取当前选中行的 header/footer 文本（若无选中则示例文案）
-        header_text = "Header"; footer_text = "Footer"
-        current_row = self.file_table.currentRow()
-        if current_row >= 0:
-            try:
-                header_item = self.file_table.item(current_row, 4)
-                footer_item = self.file_table.item(current_row, 5)
-                if header_item and header_item.text(): header_text = header_item.text()
-                if footer_item and footer_item.text(): footer_text = footer_item.text()
-            except Exception:
-                pass
-        
-        # Header 在上方
-        painter.setPen(QPen(Qt.black))
-        header_font_name = settings.get("header_font_name", "Helvetica")
-        if not QFont(header_font_name).exactMatch(): header_font_name = QFont().defaultFamily()
-        header_font_size = max(int(settings.get("header_font_size", 14)), 8)
-        painter.setFont(QFont(header_font_name, header_font_size))
-        header_x_pt = int(settings.get("header_x", 21))
-        header_x = max(int(header_x_pt * scale_x), 10)
-        painter.drawText(header_x, height // 2 - 15, header_text[:40])
-        
-        # Footer 在下方
-        painter.setPen(QPen(Qt.darkGray))
-        footer_font_name = settings.get("footer_font_name", "Helvetica")
-        if not QFont(footer_font_name).exactMatch(): footer_font_name = QFont().defaultFamily()
-        footer_font_size = max(int(settings.get("footer_font_size", 14)), 8)
-        painter.setFont(QFont(footer_font_name, footer_font_size))
-        footer_x_pt = int(settings.get("footer_x", 21))
-        footer_x = max(int(footer_x_pt * scale_x), 10)
-        painter.drawText(footer_x, height // 2 + 25, footer_text[:40])
-        
-        painter.end()
-        self.preview_canvas.setPixmap(pixmap)
+            pixmap = QPixmap(600, 360); pixmap.fill(Qt.white)
+            p = QPainter(pixmap); p.setPen(QPen(Qt.gray)); p.drawText(20, 40, _("Preview failed")); p.end()
+            self.preview_canvas.setPixmap(pixmap)
 
     def _validate_positions(self):
         """验证Y坐标是否在打印安全区内"""
@@ -819,3 +838,134 @@ class MainWindow(QMainWindow):
             "Project Homepage:\n"
             "https://hs2wxdogy2.feishu.cn/wiki/Kjv3wQfV5iKpGXkQ8aCcOkj6nVf"
         )
+
+    def _setup_context_menu(self):
+        """设置文件列表的右键菜单"""
+        self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_table.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _show_context_menu(self, position):
+        """显示右键菜单"""
+        row = self.file_table.rowAt(position.y())
+        if row < 0 or row >= len(self.file_items):
+            return
+            
+        menu = QMenu(self)
+        
+        # 读取现有页眉/页脚
+        read_action = menu.addAction(_("读取现有页眉/页脚"))
+        read_action.triggered.connect(lambda: self._read_existing_headers_footers(row))
+        
+        # 删除文件
+        delete_action = menu.addAction(_("删除"))
+        delete_action.triggered.connect(lambda: self._delete_file(row))
+        
+        menu.exec_(self.file_table.mapToGlobal(position))
+
+    def _read_existing_headers_footers(self, row):
+        """读取指定文件的现有页眉/页脚"""
+        if row < 0 or row >= len(self.file_items):
+            return
+            
+        file_path = self.file_items[row].path
+        try:
+            from pdf_utils import extract_artifact_headers_footers
+            result = extract_artifact_headers_footers(file_path, max_pages=3)
+            
+            if not result or not result.get("pages"):
+                QMessageBox.information(self, _("读取结果"), _("未检测到现有的结构化页眉/页脚"))
+                return
+                
+            # 构建显示内容
+            content = _("检测到以下页眉/页脚内容：\n\n")
+            for page_info in result["pages"]:
+                content += f"第 {page_info['page']} 页:\n"
+                if page_info.get("header"):
+                    content += f"  页眉: {', '.join(page_info['header'])}\n"
+                if page_info.get("footer"):
+                    content += f"  页脚: {', '.join(page_info['footer'])}\n"
+                content += "\n"
+            
+            # 询问用户操作
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle(_("现有页眉/页脚"))
+            msg_box.setText(content)
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg_box.setInformativeText(_("点击确定关闭"))
+            msg_box.exec_()
+            
+        except Exception as e:
+            QMessageBox.warning(self, _("读取失败"), f"{_('读取现有页眉/页脚失败')}: {str(e)}")
+
+    def _delete_file(self, row):
+        """删除指定文件"""
+        if row < 0 or row >= len(self.file_items):
+            return
+            
+        reply = QMessageBox.question(
+            self, _("确认删除"), 
+            f"{_('确定要删除文件')} '{self.file_items[row].name}' {_('吗？')}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.file_items.pop(row)
+            self._update_file_table()
+            self.update_preview()
+
+    def _apply_top_right_preset(self):
+        """应用右上角预设位置"""
+        # 计算右上角位置：距右边0.3cm，距上边0.8cm
+        # 1cm ≈ 28.35pt
+        right_margin = int(0.3 * 28.35)  # 0.3cm to pt
+        top_margin = int(0.8 * 28.35)    # 0.8cm to pt
+        
+        # 获取当前选中文件的实际页面尺寸来计算X位置
+        row = self.file_table.currentRow()
+        if row >= 0 and row < len(self.file_items):
+            try:
+                import fitz
+                doc = fitz.open(self.file_items[row].path)
+                if len(doc) > 0:
+                    page = doc[0]
+                    page_width = page.rect.width
+                    # X = 页面宽度 - 右边距 - 预估文本宽度
+                    # 假设文本宽度约为字体大小 * 字符数 * 0.6
+                    font_size = self.header_size_spin.value()
+                    estimated_text_width = font_size * 0.6 * 20  # 假设20个字符
+                    x = int(page_width - right_margin - estimated_text_width)
+                    self.header_x_spin.setValue(max(0, x))
+                doc.close()
+            except:
+                # 如果无法获取页面尺寸，使用默认值
+                self.header_x_spin.setValue(500)  # 默认靠右
+        
+        self.header_y_spin.setValue(int(842 - top_margin))  # A4高度 - 上边距
+        self.header_size_spin.setValue(14)  # 14号字体
+
+    def _apply_bottom_right_preset(self):
+        """应用右下角预设位置"""
+        # 计算右下角位置：距右边0.3cm，距下边0.8cm
+        right_margin = int(0.3 * 28.35)  # 0.3cm to pt
+        bottom_margin = int(0.8 * 28.35) # 0.8cm to pt
+        
+        # 获取当前选中文件的实际页面尺寸来计算X位置
+        row = self.file_table.currentRow()
+        if row >= 0 and row < len(self.file_items):
+            try:
+                import fitz
+                doc = fitz.open(self.file_items[row].path)
+                if len(doc) > 0:
+                    page = doc[0]
+                    page_width = page.rect.width
+                    # X = 页面宽度 - 右边距 - 预估文本宽度
+                    font_size = self.footer_size_spin.value()
+                    estimated_text_width = font_size * 0.6 * 20
+                    x = int(page_width - right_margin - estimated_text_width)
+                    self.footer_x_spin.setValue(max(0, x))
+                doc.close()
+            except:
+                self.footer_x_spin.setValue(500)
+        
+        self.footer_y_spin.setValue(int(bottom_margin))  # 下边距
+        self.footer_size_spin.setValue(14)  # 14号字体

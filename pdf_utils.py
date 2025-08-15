@@ -128,3 +128,50 @@ def register_font_safely(font_name: str) -> bool:
     except Exception as e:
         logger.warning(f"[Font] Failed to register font '{font_name}': {e}")
         return False
+
+# --- Artifact header/footer extraction ---
+import re
+import pikepdf
+from pikepdf import Name
+
+def extract_artifact_headers_footers(path: str, max_pages: int = 3) -> dict:
+    """
+    扫描前几页内容流，提取 Acrobat 风格的 Artifact 分页工件中的 ASCII 文本。
+    返回结构：{"pages": [{"page":1, "header":["..."], "footer":["..."]}, ...]}
+    仅适用于我们注入的 ASCII 文字或其他简单 Tj 情况。
+    """
+    result = {"pages": []}
+    try:
+        with pikepdf.open(path) as pdf:
+            for i, page in enumerate(pdf.pages[:max_pages]):
+                content_obj = page.obj.get(Name('/Contents'))
+                if content_obj is None:
+                    result["pages"].append({"page": i+1, "header": [], "footer": []})
+                    continue
+                # 拼接内容字节
+                if isinstance(content_obj, pikepdf.Array):
+                    content_bytes = b"".join([c.read_bytes() for c in content_obj])
+                elif isinstance(content_obj, pikepdf.Stream):
+                    content_bytes = content_obj.read_bytes()
+                else:
+                    content_bytes = b""
+                text = content_bytes.decode('latin-1', errors='ignore')
+                header_matches = re.findall(r"/Artifact\s*<<[^>]*?/Subtype\s*/Header[^>]*?>>\s*BDC(.*?)EMC", text, re.DOTALL)
+                footer_matches = re.findall(r"/Artifact\s*<<[^>]*?/Subtype\s*/Footer[^>]*?>>\s*BDC(.*?)EMC", text, re.DOTALL)
+                # 提取括号字符串
+                def _extract_strings(segment: str) -> list[str]:
+                    raw = re.findall(r"\((.*?)(?<!\\)\)", segment, re.DOTALL)
+                    # 反转义 \\ \( \)
+                    out = [s.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\") for s in raw]
+                    return [s.strip() for s in out if s.strip()]
+                headers = []
+                for seg in header_matches:
+                    headers.extend(_extract_strings(seg))
+                footers = []
+                for seg in footer_matches:
+                    footers.extend(_extract_strings(seg))
+                result["pages"].append({"page": i+1, "header": headers, "footer": footers})
+        return result
+    except Exception as e:
+        logger.warning(f"[Artifact] Extraction failed for {path}: {e}")
+        return result

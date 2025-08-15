@@ -174,6 +174,18 @@ class ProcessingController:
             logger.error(f"CLI 批处理失败: {e}", exc_info=True)
             return []
 
+    def merge_pdfs(self, input_paths: List[str], output_path: str, add_page_numbers: bool = False):
+        """合并PDF文件"""
+        try:
+            from pdf_handler import merge_pdfs
+            success, error = merge_pdfs(input_paths, output_path)
+            if not success:
+                raise Exception(f"合并失败: {error}")
+            return True
+        except Exception as e:
+            logger.error(f"合并PDF失败: {e}")
+            raise
+
 class Worker(QObject):
     
     def __init__(self, controller, file_items, output_dir, header_settings, footer_settings):

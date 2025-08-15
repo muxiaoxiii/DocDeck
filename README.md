@@ -1,75 +1,244 @@
-# DocDeck - 专业的 PDF 批处理工具 🧰
+# DocDeck 2.0.2
 
-**DocDeck** 是一款功能丰富且操作直观的跨平台桌面应用，专为高效批量处理 PDF 文件而打造。它支持添加页眉页脚、合并文档、解除加密限制，并兼具命令行自动化能力。
+一个功能强大的PDF处理工具，支持批量添加页眉页脚、A4规范化、结构化输出和智能合并。
 
-<!-- TODO: 添加应用界面截图 -->
+## ✨ 主要功能
 
-## ✨ 主要功能亮点
+### 🔧 核心功能
+- **批量PDF处理**：支持单个文件、文件夹或递归目录扫描
+- **智能页眉页脚**：可自定义字体、大小、位置和内容
+- **A4规范化**：自动将各种尺寸的PDF调整为标准A4格式
+- **结构化输出**：生成符合PDF规范的页眉页脚，可在Acrobat中正确识别
+- **中文支持**：完整的Unicode和CID字体支持
+- **实时预览**：渲染真实PDF页面，检测文本重叠
 
-- **批量添加页眉/页脚**
-  - 三种模式：文件名 / 自动编号 / 自定义文本
-  - 支持字体、字号、颜色、位置 (X/Y 坐标) 全面自定义
-  - 实时可视化预览页眉位置
+### 🎯 高级特性
+- **多模式处理**：支持覆盖模式和结构化模式
+- **字体管理**：自动检测系统字体，支持自定义字体
+- **位置预设**：一键设置右上角/右下角标准位置
+- **现有内容读取**：可读取已存在的结构化页眉页脚
+- **PDF合并**：支持处理后的文件合并，可添加页码
+- **命令行接口**：完整的CLI支持，适合自动化处理
 
-- **智能字体推荐**
-  - 自动扫描 PDF 内容，提取并推荐原始字体风格
+### 🖥️ 跨平台支持
+- **macOS**：原生应用包 (.app) 和磁盘镜像 (.dmg)
+- **Windows**：可执行文件和压缩包
+- **Linux**：可执行文件和压缩包
 
-- **PDF 合并**
-  - 支持拖拽排序和合并预览
-  - 可选添加页码，样式灵活自定义
+## 🚀 快速开始
 
-- **PDF 解锁**
-  - 支持移除打开密码与权限限制，兼容加密文档
+### 图形界面版本
 
-- **跨平台支持**
-  - 支持 **Windows、macOS、Linux**
+1. **下载安装**
+   - 从 [Releases](https://github.com/yourusername/DocDeck/releases) 页面下载对应平台的安装包
+   - 解压或安装到本地目录
 
-- **命令行批处理**
-  - 适用于自动化脚本及集成流程
+2. **启动应用**
+   ```bash
+   # macOS
+   open DocDeck.app
+   
+   # Windows/Linux
+   ./DocDeck
+   ```
 
-- **实时预览**
-  - 调整页眉/页脚设置时，预览区域实时同步更新显示效果
+3. **基本使用**
+   - 点击"选择文件"或"选择文件夹"导入PDF
+   - 设置页眉页脚内容和样式
+   - 选择输出目录
+   - 点击"开始处理"
 
-- **灵活的编号控制**
-  - 自动编号支持位数自定义，例如 001、0001 等格式
-
-- **智能处理加密文件**
-  - 检测到加密 PDF 时自动提示，用户可选择是否解密继续处理
-
-- **更合理的字体处理机制**
-  - 修复了字体替换不生效问题，确保中英文字符完整显示
-
-## 🚀 安装与使用
-
-稍后将提供 [Releases 页面](https://github.com/muxiaoxiii/DocDeck/releases) 下载链接（包含 Windows/macOS/Linux 打包版本）。
-
-### 📝 日志记录
-
-程序运行时将记录详细日志，默认保存在当前目录的 `docdeck.log` 文件中，可用于排查问题与调试分析。
-
-## 🛠️ 开发者指南
-
-如需从源码运行或参与贡献，请按以下步骤操作：
+### 命令行版本
 
 ```bash
-# 克隆项目
-git clone https://github.com/muxiaoxiii/DocDeck.git
+# 基本批处理
+python main.py --source "folder1" "file1.pdf" --output "output_dir"
+
+# 启用结构化模式
+python main.py --source "input_folder" --output "output_dir" --structured
+
+# 启用A4规范化
+python main.py --source "input_folder" --output "output_dir" --normalize-a4
+
+# 自定义页眉位置和字体
+python main.py --source "input_folder" --output "output_dir" \
+  --header-text "公司名称" \
+  --header-font "SimHei" \
+  --header-size 16 \
+  --header-x 100 \
+  --header-y 800
+
+# 合并输出文件并添加页码
+python main.py --source "input_folder" --output "output_dir" \
+  --merge \
+  --add-page-numbers
+```
+
+## 📖 详细使用说明
+
+### 页眉页脚设置
+
+#### 文本内容
+- **固定文本**：直接输入要显示的文本
+- **自动编号**：使用 `{page}` 和 `{total}` 占位符
+- **自定义格式**：支持前缀、后缀、起始编号、步长等
+
+#### 位置控制
+- **坐标系统**：使用点(pt)为单位，原点在页面左下角
+- **预设位置**：
+  - 右上角：距右边0.3cm，距上边0.8cm
+  - 右下角：距右边0.3cm，距下边0.8cm
+- **手动调整**：可精确设置X、Y坐标
+
+#### 字体设置
+- **字体名称**：支持系统已安装的字体
+- **字体大小**：推荐使用14pt，适合打印
+- **中文支持**：自动检测中文字体，支持固定字体模式
+
+### 处理模式
+
+#### 覆盖模式 (默认)
+- 使用ReportLab在PDF上叠加文本
+- 兼容性好，适合简单应用
+- 不支持文本选择和搜索
+
+#### 结构化模式
+- 生成符合PDF规范的页眉页脚
+- 可在Acrobat中正确识别和编辑
+- 支持文本选择和搜索
+- 自动处理字体嵌入和编码映射
+
+### A4规范化
+
+- **自动检测**：识别页面方向和尺寸
+- **智能缩放**：保持内容比例，居中显示
+- **旋转处理**：自动处理90°、180°、270°旋转
+- **临时文件管理**：处理完成后自动清理
+
+## 🛠️ 安装和构建
+
+### 从源码构建
+
+```bash
+# 克隆仓库
+git clone https://github.com/yourusername/DocDeck.git
 cd DocDeck
 
-# 创建虚拟环境（推荐）
+# 创建虚拟环境
 python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
+source venv/bin/activate  # Linux/macOS
+# 或
+venv\Scripts\activate     # Windows
 
 # 安装依赖
 pip install -r requirements.txt
 
-# 运行程序
+# 运行
 python main.py
 ```
 
+### 构建可执行文件
+
+```bash
+# 安装PyInstaller
+pip install pyinstaller
+
+# 构建
+pyinstaller --noconfirm --clean --windowed --name "DocDeck" main.py
+
+# 构建macOS DMG (需要create-dmg或hdiutil)
+bash build-mac.sh
+```
+
+## 📋 系统要求
+
+- **Python**: 3.8+
+- **操作系统**: Windows 10+, macOS 10.14+, Ubuntu 18.04+
+- **内存**: 建议4GB+
+- **存储**: 至少500MB可用空间
+
+### 依赖库
+- **PySide6**: Qt6 GUI框架
+- **PyPDF2**: PDF读写
+- **PyMuPDF (fitz)**: PDF渲染和预览
+- **pikepdf**: 高级PDF操作
+- **ReportLab**: PDF生成和字体处理
+
+## 🔧 配置选项
+
+### 默认设置
+```python
+DEFAULT_FONT_NAME = "Helvetica"
+DEFAULT_FONT_SIZE = 14
+DEFAULT_HEADER_X = 21      # 0.3cm from left
+DEFAULT_HEADER_Y = 28      # 0.8cm from top
+DEFAULT_FOOTER_X = 21      # 0.3cm from left  
+DEFAULT_FOOTER_Y = 28      # 0.8cm from bottom
+```
+
+### 配置文件
+应用会自动创建配置文件保存用户设置，包括：
+- 字体选择
+- 位置偏好
+- 输出目录
+- 处理模式
+
+## 🚨 故障排除
+
+### 常见问题
+
+**Q: 处理中文PDF时出现乱码**
+A: 确保启用了"结构化模式"，或选择支持中文的字体
+
+**Q: 预览不显示或显示错误**
+A: 检查PDF文件是否损坏，或尝试重新导入文件
+
+**Q: 构建失败**
+A: 确保所有依赖已正确安装，检查Python版本兼容性
+
+**Q: 内存不足错误**
+A: 分批处理大文件，或增加系统虚拟内存
+
+### 日志文件
+应用会在 `logs/` 目录下生成详细的日志文件，包含：
+- 处理过程信息
+- 错误详情
+- 性能统计
+
+## 🤝 贡献指南
+
+欢迎提交Issue和Pull Request！
+
+### 开发环境设置
+1. Fork项目
+2. 创建功能分支
+3. 提交更改
+4. 创建Pull Request
+
+### 代码规范
+- 使用Python类型注解
+- 遵循PEP 8代码风格
+- 添加适当的注释和文档字符串
+- 确保所有测试通过
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+## 🙏 致谢
+
+- [PySide6](https://doc.qt.io/qtforpython/) - Qt6 Python绑定
+- [PyPDF2](https://pypdf2.readthedocs.io/) - PDF处理库
+- [PyMuPDF](https://pymupdf.readthedocs.io/) - PDF渲染库
+- [pikepdf](https://pikepdf.readthedocs.io/) - 现代PDF库
+- [ReportLab](https://www.reportlab.com/) - PDF生成库
+
+## 📞 支持
+
+- **GitHub Issues**: [报告Bug](https://github.com/yourusername/DocDeck/issues)
+- **讨论区**: [GitHub Discussions](https://github.com/yourusername/DocDeck/discussions)
+- **文档**: [Wiki](https://github.com/yourusername/DocDeck/wiki)
+
 ---
 
-*Created with ❤️ by [muxiaoxi](https://github.com/muxiaoxiii/)*
+**DocDeck 2.0.2** - 让PDF处理变得简单高效 🚀

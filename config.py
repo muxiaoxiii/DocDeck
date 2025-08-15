@@ -125,6 +125,11 @@ def apply_defaults(settings: dict) -> dict:
         "number_prefix": DEFAULT_NUMBER_PREFIX,
         "number_suffix": DEFAULT_NUMBER_SUFFIX,
         "language": DEFAULT_LANGUAGE,
+        # new feature flags
+        "structured": False,
+        "normalize_a4": True,
+        "structured_cn_fixed": False,
+        "structured_cn_font": DEFAULT_FONT_NAME,
     }
     for key, value in defaults.items():
         if key not in settings:

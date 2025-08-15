@@ -183,31 +183,46 @@ def _add_marked_form_overlay(pdf: pikepdf.Pdf, page: pikepdf.Page, overlay_pdf_b
 A4_PORTRAIT = (595.0, 842.0)
 A4_LANDSCAPE = (842.0, 595.0)
 
+def _get_page_box(page: pikepdf.Page, name: str):
+    box = page.obj.get(Name(f'/{name}'))
+    return box if (box is not None and len(box) == 4) else None
+
 def _normalize_page_to_a4(page: pikepdf.Page):
     """
-    将页面规格统一到 A4（保持方向）。在页面内容外包裹缩放和平移矩阵，并设置 MediaBox/CropBox。
+    将页面规格统一到 A4（保持方向）。优先使用 CropBox 尺寸，处理 Rotate。
+    在页面内容外包裹缩放和平移矩阵，并设置 MediaBox/CropBox，清零 Rotate。
     """
-    mb = page.obj.get(Name('/MediaBox'))
-    if not mb or len(mb) != 4:
-        return
-    width = float(mb[2] - mb[0])
-    height = float(mb[3] - mb[1])
-    portrait = height >= width
-    target_w, target_h = (A4_PORTRAIT if portrait else A4_LANDSCAPE)
-    # 等比缩放以“适配”目标纸张
-    sx = target_w / width
-    sy = target_h / height
-    s = min(sx, sy)
-    new_w = width * s
-    new_h = height * s
-    # 居中偏移
-    tx = (target_w - new_w) / 2.0
-    ty = (target_h - new_h) / 2.0
-    # 在内容前后包裹 q/Q 和 cm 变换
-    cm_prefix = f"q {s:.6f} 0 0 {s:.6f} {tx:.6f} {ty:.6f} cm\n"
-    cm_suffix = "Q\n"
     try:
-        # 前置
+        crop = _get_page_box(page, 'CropBox')
+        mb = _get_page_box(page, 'MediaBox')
+        box = crop or mb
+        if not box:
+            return
+        width = float(box[2] - box[0])
+        height = float(box[3] - box[1])
+        rotate = int(page.obj.get(Name('/Rotate'), 0)) % 360
+        if rotate in (90, 270):
+            width, height = height, width
+        portrait = height >= width
+        target_w, target_h = (A4_PORTRAIT if portrait else A4_LANDSCAPE)
+        sx = target_w / width
+        sy = target_h / height
+        s = min(sx, sy)
+        new_w = width * s
+        new_h = height * s
+        tx = (target_w - new_w) / 2.0
+        ty = (target_h - new_h) / 2.0
+        # 旋转矩阵（将页面内容旋回到0度）
+        cos_sin = {
+            0: (1, 0, 0, 1),
+            90: (0, 1, -1, 0),
+            180: (-1, 0, 0, -1),
+            270: (0, -1, 1, 0)
+        }
+        a, b, c, d = cos_sin.get(rotate, (1, 0, 0, 1))
+        # 组合变换：先旋转到0，再缩放并居中
+        cm_prefix = f"q {a*s:.6f} {b*s:.6f} {c*s:.6f} {d*s:.6f} {tx:.6f} {ty:.6f} cm\n"
+        cm_suffix = "Q\n"
         prefix_stream = pikepdf.Stream(page.obj.pdf, cm_prefix.encode('latin-1'))
         contents = page.obj.get(Name('/Contents'))
         if contents is None:
@@ -217,16 +232,18 @@ def _normalize_page_to_a4(page: pikepdf.Page):
                 contents.insert(0, page.obj.pdf.make_indirect(prefix_stream))
             else:
                 page.obj[Name('/Contents')] = pikepdf.Array([page.obj.pdf.make_indirect(prefix_stream), contents])
-        # 后置
         suffix_stream = pikepdf.Stream(page.obj.pdf, cm_suffix.encode('latin-1'))
         contents2 = page.obj.get(Name('/Contents'))
         if isinstance(contents2, pikepdf.Array):
             contents2.append(page.obj.pdf.make_indirect(suffix_stream))
         else:
             page.obj[Name('/Contents')] = pikepdf.Array([contents2, page.obj.pdf.make_indirect(suffix_stream)])
-        # 更新盒子尺寸
-        page.obj[Name('/MediaBox')] = pikepdf.Array([0, 0, target_w, target_h])
-        page.obj[Name('/CropBox')] = pikepdf.Array([0, 0, target_w, target_h])
+        # 更新盒子尺寸与旋转
+        new_box = pikepdf.Array([0, 0, target_w, target_h])
+        page.obj[Name('/MediaBox')] = new_box
+        page.obj[Name('/CropBox')] = new_box
+        if page.obj.get(Name('/Rotate')) is not None:
+            page.obj[Name('/Rotate')] = 0
     except Exception as e:
         logger.warning(f"Normalize page to A4 failed: {e}")
 
@@ -247,10 +264,13 @@ def _normalize_pdf_file_to_a4(input_path: str) -> str:
 
 def _process_single_file_with_overlay(item: PDFFileItem, output_dir: str, header_settings: Dict[str, Any], footer_settings: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
     """复用现有 PyPDF2+ReportLab 覆盖路径处理单文件。返回 (success, output_path, error)."""
+    temp_to_cleanup = None
     try:
         source_path = item.path
         if header_settings.get("normalize_a4") or footer_settings.get("normalize_a4"):
             source_path = _normalize_pdf_file_to_a4(source_path)
+            if source_path != item.path:
+                temp_to_cleanup = source_path
         reader = PdfReader(source_path)
         item.page_count = len(reader.pages)
         item.encryption_status = EncryptionStatus.LOCKED if reader.is_encrypted else EncryptionStatus.OK
@@ -280,6 +300,12 @@ def _process_single_file_with_overlay(item: PDFFileItem, output_dir: str, header
         return True, output_path, None
     except Exception as e:
         return False, None, str(e)
+    finally:
+        if temp_to_cleanup and os.path.exists(temp_to_cleanup):
+            try:
+                os.remove(temp_to_cleanup)
+            except Exception:
+                pass
 
 def process_pdfs_in_batch(
     file_infos: List[PDFFileItem],
