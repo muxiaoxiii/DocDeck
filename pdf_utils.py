@@ -175,3 +175,190 @@ def extract_artifact_headers_footers(path: str, max_pages: int = 3) -> dict:
     except Exception as e:
         logger.warning(f"[Artifact] Extraction failed for {path}: {e}")
         return result
+
+def detect_headers_footers_heuristic(path: str, max_pages: int = 5) -> dict:
+    """
+    使用启发式方法检测页眉页脚，不依赖Artifact标签。
+    通过文本位置聚类、重复性分析等方法识别。
+    
+    返回结构：{"pages": [{"page":1, "header":["..."], "footer":["..."]}, ...]}
+    """
+    try:
+        import fitz
+        doc = fitz.open(path)
+        results = {"pages": []}
+        
+        # 分析前几页
+        pages_to_analyze = min(max_pages, len(doc))
+        
+        # 收集所有文本块的位置信息
+        all_text_blocks = []
+        for page_num in range(pages_to_analyze):
+            page = doc[page_num]
+            blocks = page.get_text("dict")
+            
+            for block in blocks.get("blocks", []):
+                if "lines" in block:
+                    for line in block["lines"]:
+                        for span in line.get("spans", []):
+                            if span.get("text", "").strip():
+                                all_text_blocks.append({
+                                    "page": page_num + 1,
+                                    "text": span["text"].strip(),
+                                    "bbox": span["bbox"],  # [x0, y0, x1, y1]
+                                    "size": span.get("size", 0),
+                                    "font": span.get("font", "")
+                                })
+        
+        if not all_text_blocks:
+            return results
+        
+        # 按页面分组
+        pages_data = {}
+        for block in all_text_blocks:
+            page_num = block["page"]
+            if page_num not in pages_data:
+                pages_data[page_num] = []
+            pages_data[page_num].append(block)
+        
+        # 分析每页
+        for page_num in range(1, pages_to_analyze + 1):
+            if page_num not in pages_data:
+                continue
+                
+            page_blocks = pages_data[page_num]
+            page_height = doc[page_num - 1].rect.height
+            
+            # 定义页眉页脚区域（页面顶部和底部20%）
+            header_zone = page_height * 0.2
+            footer_zone = page_height * 0.8
+            
+            headers = []
+            footers = []
+            
+            for block in page_blocks:
+                bbox = block["bbox"]
+                y_pos = bbox[1]  # y0位置
+                text = block["text"]
+                
+                # 过滤掉太短的文本
+                if len(text) < 2:
+                    continue
+                
+                # 根据Y位置判断是页眉还是页脚
+                if y_pos < header_zone:
+                    # 页眉区域
+                    if _is_likely_header_footer(text, block["size"], block["font"]):
+                        headers.append(text)
+                elif y_pos > footer_zone:
+                    # 页脚区域
+                    if _is_likely_header_footer(text, block["size"], block["font"]):
+                        footers.append(text)
+            
+            # 去重并排序
+            headers = list(set(headers))
+            footers = list(set(footers))
+            
+            # 按Y位置排序
+            headers.sort(key=lambda x: next((b["bbox"][1] for b in page_blocks if b["text"] == x), 0))
+            footers.sort(key=lambda x: next((b["bbox"][1] for b in page_blocks if b["text"] == x), 0))
+            
+            results["pages"].append({
+                "page": page_num,
+                "header": headers,
+                "footer": footers
+            })
+        
+        doc.close()
+        return results
+        
+    except Exception as e:
+        logger.warning(f"Heuristic header/footer detection failed: {e}")
+        return {"pages": []}
+
+def _is_likely_header_footer(text: str, font_size: float, font_name: str) -> bool:
+    """
+    判断文本是否可能是页眉页脚
+    """
+    # 过滤条件
+    if not text or len(text.strip()) < 2:
+        return False
+    
+    # 过滤掉页码（纯数字）
+    if text.isdigit() and len(text) <= 3:
+        return False
+    
+    # 过滤掉太长的文本（可能是正文）
+    if len(text) > 100:
+        return False
+    
+    # 过滤掉包含特殊字符的文本（可能是正文）
+    special_chars = ['。', '，', '！', '？', '；', '：', '（', '）', '【', '】']
+    if any(char in text for char in special_chars):
+        return False
+    
+    # 检查是否包含常见的页眉页脚关键词
+    header_footer_keywords = [
+        '公司', '部门', '标题', '文档', '机密', '草稿', '最终版',
+        'page', 'page', '第', '页', '共', 'of', 'confidential',
+        'draft', 'final', 'version', 'company', 'department'
+    ]
+    
+    text_lower = text.lower()
+    if any(keyword in text_lower for keyword in header_footer_keywords):
+        return True
+    
+    # 检查字体大小（页眉页脚通常较小）
+    if font_size > 0 and font_size < 16:
+        return True
+    
+    # 检查字体名称（某些字体常用于页眉页脚）
+    header_footer_fonts = ['arial', 'helvetica', 'times', 'simsun', 'simhei']
+    if any(font in font_name.lower() for font in header_footer_fonts):
+        return True
+    
+    return False
+
+def extract_all_headers_footers(path: str, max_pages: int = 5) -> dict:
+    """
+    综合提取页眉页脚：先尝试Artifact方法，再使用启发式方法
+    """
+    # 首先尝试Artifact方法
+    artifact_result = extract_artifact_headers_footers(path, max_pages)
+    
+    # 如果Artifact方法没有结果，使用启发式方法
+    if not artifact_result or not artifact_result.get("pages"):
+        return detect_headers_footers_heuristic(path, max_pages)
+    
+    # 合并结果
+    heuristic_result = detect_headers_footers_heuristic(path, max_pages)
+    
+    # 合并两种方法的结果
+    merged_result = {"pages": []}
+    artifact_pages = {p["page"]: p for p in artifact_result["pages"]}
+    heuristic_pages = {p["page"]: p for p in heuristic_result["pages"]}
+    
+    all_pages = set(artifact_pages.keys()) | set(heuristic_pages.keys())
+    
+    for page_num in sorted(all_pages):
+        merged_page = {"page": page_num, "header": [], "footer": []}
+        
+        # 合并页眉
+        if page_num in artifact_pages:
+            merged_page["header"].extend(artifact_pages[page_num].get("header", []))
+        if page_num in heuristic_pages:
+            merged_page["header"].extend(heuristic_pages[page_num].get("header", []))
+        
+        # 合并页脚
+        if page_num in artifact_pages:
+            merged_page["footer"].extend(artifact_pages[page_num].get("footer", []))
+        if page_num in heuristic_pages:
+            merged_page["footer"].extend(heuristic_pages[page_num].get("footer", []))
+        
+        # 去重
+        merged_page["header"] = list(set(merged_page["header"]))
+        merged_page["footer"] = list(set(merged_page["footer"]))
+        
+        merged_result["pages"].append(merged_page)
+    
+    return merged_result

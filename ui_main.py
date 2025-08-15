@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QGridLayout, QLineEdit, QMenu, QInputDialog
 )
 from PySide6.QtCore import Qt, QCoreApplication, QThread, QTimer
-from PySide6.QtGui import QPainter, QPen, QFont, QPixmap, QImage
+from PySide6.QtGui import QPainter, QPen, QFont, QPixmap, QImage, QBrush, QColor
 try:
 	import fitz  # PyMuPDF
 except ImportError:
@@ -22,9 +22,269 @@ from position_utils import suggest_safe_header_y, is_out_of_print_safe_area
 from merge_dialog import MergeDialog
 from logger import logger
 
-def _(text: str) -> str:
-    """为国际化提供翻译函数"""
-    return QCoreApplication.translate("MainWindow", text)
+import locale
+import gettext
+
+def _detect_system_language():
+    """检测系统语言"""
+    try:
+        # 获取系统语言
+        system_locale = locale.getdefaultlocale()[0]
+        if system_locale:
+            if system_locale.startswith('zh'):
+                return 'zh_CN'
+            elif system_locale.startswith('en'):
+                return 'en_US'
+        return 'en_US'  # 默认英语
+    except:
+        return 'en_US'
+
+def _setup_language():
+    """设置界面语言"""
+    lang = _detect_system_language()
+    
+    if lang == 'zh_CN':
+        # 中文界面
+        return {
+            "Import Files or Folders": "导入文件或文件夹",
+            "Clear List": "清空列表",
+            "Header Mode:": "页眉模式:",
+            "Filename Mode": "文件名模式",
+            "Auto Number Mode": "自动编号模式",
+            "Custom Mode": "自定义模式",
+            "Auto Number Settings": "自动编号设置",
+            "Prefix:": "前缀:",
+            "Start #:": "起始编号:",
+            "Step:": "步长:",
+            "Digits:": "位数:",
+            "Suffix:": "后缀:",
+            "Header & Footer Settings": "页眉页脚设置",
+            "Settings": "设置",
+            "Header": "页眉",
+            "Footer": "页脚",
+            "Font:": "字体:",
+            "Size:": "大小:",
+            "X Position:": "X 位置:",
+            "Y Position:": "Y 位置:",
+            "Alignment:": "对齐:",
+            "Left": "左对齐",
+            "Center": "居中",
+            "Right": "右对齐",
+            "Global Footer Text:": "全局页脚文本:",
+            "Use {page} for current page, {total} for total pages.": "使用 {page} 表示当前页，{total} 表示总页数。",
+            "Apply to All": "应用到全部",
+            "Header/Footer Preview": "页眉/页脚预览",
+            "Page: ": "页码: ",
+            "Structured mode (Acrobat-friendly)": "结构化模式 (Acrobat友好)",
+            "Structured CN: use fixed font": "结构化中文：使用固定字体",
+            "Memory optimization (for large files)": "内存优化 (适用于大文件)",
+            "Enable chunked processing and memory cleanup for large PDF files": "启用分块处理和内存清理，适用于大PDF文件",
+            "Move Up": "上移",
+            "Move Down": "下移",
+            "Remove": "删除",
+            "Output Folder:": "输出文件夹:",
+            "Select Output Folder": "选择输出文件夹",
+            "Start Processing": "开始处理",
+            "Merge after processing": "处理后合并",
+            "Add page numbers after merge": "合并后添加页码",
+            "Normalize to A4 (auto)": "自动规范化到A4",
+            "单位:": "单位:",
+            "预设位置:": "预设位置:",
+            "右上角": "右上角",
+            "右下角": "右下角",
+            "No.": "序号",
+            "Filename": "文件名",
+            "Size (MB)": "大小 (MB)",
+            "Page Count": "页数",
+            "Header Text": "页眉文本",
+            "Footer Text": "页脚文本",
+            "读取现有页眉/页脚": "读取现有页眉/页脚",
+            "删除": "删除",
+            "Header Template:": "页眉模板:",
+            "Custom": "自定义",
+            "Company Name": "公司名称",
+            "Document Title": "文档标题",
+            "Date": "日期",
+            "Page Number": "页码",
+            "Confidential": "机密文件",
+            "Draft": "草稿",
+            "Final Version": "最终版",
+            "Help": "帮助",
+            "About DocDeck": "关于 DocDeck",
+            "DocDeck - PDF Header & Footer Tool": "DocDeck - PDF 页眉页脚工具",
+            "Author: 木小樨": "作者: 木小樨",
+            "Project Homepage:": "项目主页:",
+            "移除文件限制...": "移除文件限制...",
+            "Output Folder Not Set": "未设置输出文件夹",
+            "Please select an output folder...": "请选择输出文件夹...",
+            "Locked File": "加密文件",
+            "This file is encrypted and cannot be opened without a password.": "此文件已加密，需要密码才能打开。",
+            "Decrypt PDF": "解密PDF",
+            "Please enter the password:": "请输入密码:",
+            "Restricted PDF": "受限PDF",
+            "This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?": "此PDF受限，无法修改。\n是否尝试自动解锁？",
+            "Unlock Success": "解锁成功",
+            "Unlocked file saved to: ": "解锁文件已保存到: ",
+            "Unlock Failed": "解锁失败",
+            "Password incorrect. Would you like to attempt forced unlock without password?": "密码错误。是否尝试无密码强制解锁？",
+            "Retry Password": "重试密码",
+            "Incorrect password. Try again:": "密码错误，请重试:",
+            "Select PDF Files or Folders": "选择PDF文件或文件夹",
+            "Select Output Directory": "选择输出目录",
+            "No Files": "没有文件",
+            "Please import PDF files first.": "请先导入PDF文件。",
+            "No Output Folder": "未选择输出文件夹",
+            "Please select an output folder.": "请选择输出文件夹。",
+            "Processing... (0%)": "处理中... (0%)",
+            "The following files are encrypted or restricted:": "以下文件已加密或受限:",
+            "Please unlock them using the right-click menu before processing.": "处理前请使用右键菜单解锁。",
+            "Encrypted Files Detected": "检测到加密文件",
+            "Completed {} files": "已完成 {} 个文件",
+            "Some Files Failed": "部分文件处理失败",
+            "Done": "完成",
+            "All files processed successfully.": "所有文件处理成功。",
+            "Save Merged PDF": "保存合并的PDF",
+            "Files merged successfully and saved to:\n": "文件合并成功并保存到:\n",
+            "Files merged and page numbers added successfully:\n": "文件合并并添加页码成功:\n",
+            "Success": "成功",
+            "Operation Failed": "操作失败",
+            "Invalid Files": "无效文件",
+            "Only PDF files can be imported.": "只能导入PDF文件。",
+            "The following files are fully encrypted and require a password:\n": "以下文件完全加密，需要密码:\n",
+            "The following files are restricted (e.g., can't be modified):\n": "以下文件受限（例如，无法修改）:\n",
+            "Encrypted Files Notice": "加密文件通知",
+            "Failed to import files": "导入文件失败",
+            "No preview": "无预览",
+            "Preview failed": "预览失败",
+            "Failed to apply settings due to an error. Please check the logs.": "应用设置失败，请检查日志。",
+            "Error": "错误",
+            "Processing... ": "处理中... ",
+            "This position is too close to the edge...": "此位置太靠近边缘...",
+            "读取现有页眉/页脚失败": "读取现有页眉/页脚失败",
+            "确定要删除文件": "确定要删除文件",
+            "吗？": "吗？"
+        }
+    else:
+        # 英文界面
+        return {
+            "Import Files or Folders": "Import Files or Folders",
+            "Clear List": "Clear List",
+            "Header Mode:": "Header Mode:",
+            "Filename Mode": "Filename Mode",
+            "Auto Number Mode": "Auto Number Mode",
+            "Custom Mode": "Custom Mode",
+            "Auto Number Settings": "Auto Number Settings",
+            "Prefix:": "Prefix:",
+            "Start #:": "Start #:",
+            "Step:": "Step:",
+            "Digits:": "Digits:",
+            "Suffix:": "Suffix:",
+            "Header & Footer Settings": "Header & Footer Settings",
+            "Settings": "Settings",
+            "Header": "Header",
+            "Footer": "Footer",
+            "Font:": "Font:",
+            "Size:": "Size:",
+            "X Position:": "X Position:",
+            "Y Position:": "Y Position:",
+            "Alignment:": "Alignment:",
+            "Left": "Left",
+            "Center": "Center",
+            "Right": "Right",
+            "Global Footer Text:": "Global Footer Text:",
+            "Use {page} for current page, {total} for total pages.": "Use {page} for current page, {total} for total pages.",
+            "Apply to All": "Apply to All",
+            "Header/Footer Preview": "Header/Footer Preview",
+            "Page: ": "Page: ",
+            "Structured mode (Acrobat-friendly)": "Structured mode (Acrobat-friendly)",
+            "Structured CN: use fixed font": "Structured CN: use fixed font",
+            "Memory optimization (for large files)": "Memory optimization (for large files)",
+            "Enable chunked processing and memory cleanup for large PDF files": "Enable chunked processing and memory cleanup for large PDF files",
+            "Move Up": "Move Up",
+            "Move Down": "Move Down",
+            "Remove": "Remove",
+            "Output Folder:": "Output Folder:",
+            "Select Output Folder": "Select Output Folder",
+            "Start Processing": "Start Processing",
+            "Merge after processing": "Merge after processing",
+            "Add page numbers after merge": "Add page numbers after merge",
+            "Normalize to A4 (auto)": "Normalize to A4 (auto)",
+            "单位:": "Unit:",
+            "预设位置:": "Preset Position:",
+            "右上角": "Top Right",
+            "右下角": "Bottom Right",
+            "No.": "No.",
+            "Filename": "Filename",
+            "Size (MB)": "Size (MB)",
+            "Page Count": "Page Count",
+            "Header Text": "Header Text",
+            "Footer Text": "Footer Text",
+            "读取现有页眉/页脚": "Read Existing Headers/Footers",
+            "删除": "Delete",
+            "Header Template:": "Header Template:",
+            "Custom": "Custom",
+            "Company Name": "Company Name",
+            "Document Title": "Document Title",
+            "Date": "Date",
+            "Page Number": "Page Number",
+            "Confidential": "Confidential",
+            "Draft": "Draft",
+            "Final Version": "Final Version",
+            "Help": "Help",
+            "About DocDeck": "About DocDeck",
+            "DocDeck - PDF Header & Footer Tool": "DocDeck - PDF Header & Footer Tool",
+            "Author: 木小樨": "Author: 木小樨",
+            "Project Homepage:": "Project Homepage:",
+            "移除文件限制...": "Remove File Restrictions...",
+            "Output Folder Not Set": "Output Folder Not Set",
+            "Please select an output folder...": "Please select an output folder...",
+            "Locked File": "Locked File",
+            "This file is encrypted and cannot be opened without a password.": "This file is encrypted and cannot be opened without a password.",
+            "Decrypt PDF": "Decrypt PDF",
+            "Please enter the password:": "Please enter the password:",
+            "Restricted PDF": "Restricted PDF",
+            "This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?": "This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?",
+            "Unlock Success": "Unlock Success",
+            "Unlocked file saved to: ": "Unlocked file saved to: ",
+            "Unlock Failed": "Unlock Failed",
+            "Password incorrect. Would you like to attempt forced unlock without password?": "Password incorrect. Would you like to attempt forced unlock without password?",
+            "Retry Password": "Retry Password",
+            "Incorrect password. Try again:": "Incorrect password. Try again:",
+            "Select PDF Files or Folders": "Select PDF Files or Folders",
+            "Select Output Directory": "Select Output Directory",
+            "No Files": "No Files",
+            "Please import PDF files first.": "Please import PDF files first.",
+            "No Output Folder": "No Output Folder",
+            "Please select an output folder.": "Please select an output folder.",
+            "Processing... (0%)": "Processing... (0%)",
+            "The following files are encrypted or restricted:": "The following files are encrypted or restricted:",
+            "Please unlock them using the right-click menu before processing.": "Please unlock them using the right-click menu before processing.",
+            "Encrypted Files Detected": "Encrypted Files Detected",
+            "Completed {} files": "Completed {} files",
+            "Some Files Failed": "Some Files Failed",
+            "Done": "Done",
+            "All files processed successfully.": "All files processed successfully.",
+            "Save Merged PDF": "Save Merged PDF",
+            "Files merged successfully and saved to:\n": "Files merged successfully and saved to:\n",
+            "Files merged and page numbers added successfully:\n": "Files merged and page numbers added successfully:\n",
+            "Success": "Success",
+            "Operation Failed": "Operation Failed",
+            "Invalid Files": "Invalid Files",
+            "Only PDF files can be imported.": "Only PDF files can be imported.",
+            "The following files are fully encrypted and require a password:\n": "The following files are fully encrypted and require a password:\n",
+            "The following files are restricted (e.g., can't be modified):\n": "The following files are restricted (e.g., can't be modified):\n",
+            "Encrypted Files Notice": "Encrypted Files Notice",
+            "Failed to import files": "Failed to import files",
+            "No preview": "No preview",
+            "Preview failed": "Preview failed",
+            "Failed to apply settings due to an error. Please check the logs.": "Failed to apply settings due to an error. Please check the logs.",
+            "Error": "Error",
+            "Processing... ": "Processing... ",
+            "This position is too close to the edge...": "This position is too close to the edge...",
+            "读取现有页眉/页脚失败": "Failed to read existing headers/footers",
+            "确定要删除文件": "Are you sure you want to delete the file",
+            "吗？": "?"
+        }
 
 class MainWindow(QMainWindow):
     """
@@ -43,6 +303,15 @@ class MainWindow(QMainWindow):
         self.mode = self.MODE_FILENAME
         self.file_items = []
         self.settings_map: Dict[str, QWidget] = {}
+        
+        # 设置语言
+        self.language_map = _setup_language()
+        
+        # 定义本地化方法
+        def _(text: str) -> str:
+            """获取本地化文本"""
+            return self.language_map.get(text, text)
+        self._ = _
 
         self.setWindowTitle("DocDeck - PDF Header & Footer Tool")
         self.resize(1100, 850)
@@ -73,6 +342,34 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(top_layout)
         main_layout.addWidget(self.auto_number_group)
         main_layout.addWidget(settings_group)
+        
+        # 单位选择和预设按钮布局
+        unit_preset_layout = QHBoxLayout()
+        
+        # 单位选择
+        unit_layout = QHBoxLayout()
+        unit_layout.addWidget(QLabel(self._("单位:")))
+        self.unit_combo = QComboBox()
+        self.unit_combo.addItems(["pt", "cm", "mm"])
+        self.unit_combo.setCurrentText("pt")
+        self.unit_combo.currentTextChanged.connect(self._on_unit_changed)
+        unit_layout.addWidget(self.unit_combo)
+        unit_preset_layout.addLayout(unit_layout)
+        
+        # 预设按钮
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel(self._("预设位置:")))
+        self.top_right_btn = QPushButton(self._("右上角"))
+        self.top_right_btn.clicked.connect(self._apply_top_right_preset)
+        preset_layout.addWidget(self.top_right_btn)
+        self.bottom_right_btn = QPushButton(self._("右下角"))
+        self.bottom_right_btn.clicked.connect(self._apply_bottom_right_preset)
+        preset_layout.addWidget(self.bottom_right_btn)
+        unit_preset_layout.addLayout(preset_layout)
+        
+        unit_preset_layout.addStretch()
+        main_layout.addLayout(unit_preset_layout)
+        
         main_layout.addLayout(table_layout)
         main_layout.addLayout(output_layout)
         
@@ -81,18 +378,18 @@ class MainWindow(QMainWindow):
     def _create_top_bar(self) -> QHBoxLayout:
         """创建顶部包含导入、清空和模式选择的工具栏"""
         layout = QHBoxLayout()
-        self.import_button = QPushButton(_("Import Files or Folders"))
-        self.clear_button = QPushButton(_("Clear List"))
-        mode_label = QLabel(_("Header Mode:"))
+        self.import_button = QPushButton(self._("Import Files or Folders"))
+        self.clear_button = QPushButton(self._("Clear List"))
+        mode_label = QLabel(self._("Header Mode:"))
         self.mode_select_combo = QComboBox()
-        self.mode_select_combo.addItems([_("Filename Mode"), _("Auto Number Mode"), _("Custom Mode")])
+        self.mode_select_combo.addItems([self._("Filename Mode"), self._("Auto Number Mode"), self._("Custom Mode")])
         layout.addWidget(self.import_button); layout.addWidget(self.clear_button)
         layout.addStretch(); layout.addWidget(mode_label); layout.addWidget(self.mode_select_combo)
         return layout
 
     def _create_auto_number_group(self) -> QGroupBox:
         """创建自动编号设置的控件组"""
-        group = QGroupBox(_("Auto Number Settings"))
+        group = QGroupBox(self._("Auto Number Settings"))
         layout = QHBoxLayout()
         self.prefix_input = QLineEdit("Doc-")
         self.start_spin = QSpinBox(); self.start_spin.setRange(1, 9999); self.start_spin.setValue(1)
@@ -100,64 +397,81 @@ class MainWindow(QMainWindow):
         self.digits_spin = QSpinBox(); self.digits_spin.setRange(1, 6); self.digits_spin.setValue(3)
         self.suffix_input = QLineEdit("")
         
-        layout.addWidget(QLabel(_("Prefix:"))); layout.addWidget(self.prefix_input)
-        layout.addWidget(QLabel(_("Start #:"))); layout.addWidget(self.start_spin)
-        layout.addWidget(QLabel(_("Step:"))); layout.addWidget(self.step_spin)
-        layout.addWidget(QLabel(_("Digits:"))); layout.addWidget(self.digits_spin)
-        layout.addWidget(QLabel(_("Suffix:"))); layout.addWidget(self.suffix_input)
+        layout.addWidget(QLabel(self._("Prefix:"))); layout.addWidget(self.prefix_input)
+        layout.addWidget(QLabel(self._("Start #:"))); layout.addWidget(self.start_spin)
+        layout.addWidget(QLabel(self._("Step:"))); layout.addWidget(self.step_spin)
+        layout.addWidget(QLabel(self._("Digits:"))); layout.addWidget(self.digits_spin)
+        layout.addWidget(QLabel(self._("Suffix:"))); layout.addWidget(self.suffix_input)
         group.setLayout(layout)
         group.setVisible(False)
         return group
 
     def _create_settings_grid_group(self) -> QGroupBox:
         """创建页眉页脚的网格布局设置控件组（新版：设置与预览横向并排，预览为横条，仅Header/Footer）"""
-        group = QGroupBox(_("Header & Footer Settings"))
+        group = QGroupBox(self._("Header & Footer Settings"))
         group.setObjectName("Header & Footer Settings")
         grid = QGridLayout()
         grid.setColumnStretch(1, 1); grid.setColumnStretch(2, 1); grid.setColumnStretch(3, 1)
 
         # 设置控件部分
-        grid.addWidget(QLabel("<b>" + _("Settings") + "</b>"), 0, 0, Qt.AlignRight)
-        grid.addWidget(QLabel("<b>" + _("Header") + "</b>"), 0, 1, Qt.AlignCenter)
-        grid.addWidget(QLabel("<b>" + _("Footer") + "</b>"), 0, 2, Qt.AlignCenter)
+        grid.addWidget(QLabel("<b>" + self._("Settings") + "</b>"), 0, 0, Qt.AlignRight)
+        grid.addWidget(QLabel("<b>" + self._("Header") + "</b>"), 0, 1, Qt.AlignCenter)
+        grid.addWidget(QLabel("<b>" + self._("Footer") + "</b>"), 0, 2, Qt.AlignCenter)
         
         self.font_select = QComboBox(); self.font_select.addItems(get_system_fonts())
         self.footer_font_select = QComboBox(); self.footer_font_select.addItems(get_system_fonts())
         self.font_size_spin = QSpinBox(); self.font_size_spin.setRange(6, 72); self.font_size_spin.setValue(14)
         self.footer_font_size_spin = QSpinBox(); self.footer_font_size_spin.setRange(6, 72); self.footer_font_size_spin.setValue(14)
-        grid.addWidget(QLabel(_("Font:")), 1, 0, Qt.AlignRight); grid.addWidget(self.font_select, 1, 1); grid.addWidget(self.footer_font_select, 1, 2)
-        grid.addWidget(QLabel(_("Size:")), 2, 0, Qt.AlignRight); grid.addWidget(self.font_size_spin, 2, 1); grid.addWidget(self.footer_font_size_spin, 2, 2)
+        grid.addWidget(QLabel(self._("Font:")), 1, 0, Qt.AlignRight); grid.addWidget(self.font_select, 1, 1); grid.addWidget(self.footer_font_select, 1, 2)
+        grid.addWidget(QLabel(self._("Size:")), 2, 0, Qt.AlignRight); grid.addWidget(self.font_size_spin, 2, 1); grid.addWidget(self.footer_font_size_spin, 2, 2)
         
-        self.x_input = QSpinBox(); self.x_input.setRange(0, 1000); self.x_input.setValue(21)  # 0.3cm ≈ 8.5pt，取约 21pt 右侧对齐时会用到按钮调整
-        self.footer_x_input = QSpinBox(); self.footer_x_input.setRange(0, 1000); self.footer_x_input.setValue(21)
-        self.y_input = QSpinBox(); self.y_input.setRange(0, 1000); self.y_input.setValue(int(28.35))  # 0.8cm≈22.7pt，考虑安全边距取约 28pt
+        # 设置合理的默认位置：页眉在顶部，页脚在右下角
+        self.x_input = QSpinBox(); self.x_input.setRange(0, 1000); self.x_input.setValue(50)  # 距左边50pt
+        self.footer_x_input = QSpinBox(); self.footer_x_input.setRange(0, 1000); self.footer_x_input.setValue(400)  # 页脚靠右
+        self.y_input = QSpinBox(); self.y_input.setRange(0, 1000); self.y_input.setValue(800)  # 距顶部800pt (A4高度842pt)
         self.header_y_warning_label = self._create_warning_label()
         header_y_layout = QHBoxLayout(); header_y_layout.addWidget(self.y_input); header_y_layout.addWidget(self.header_y_warning_label)
-        self.footer_y_input = QSpinBox(); self.footer_y_input.setRange(0, 1000); self.footer_y_input.setValue(int(28.35))
+        self.footer_y_input = QSpinBox(); self.footer_y_input.setRange(0, 1000); self.footer_y_input.setValue(50)  # 距底部50pt
         self.footer_y_warning_label = self._create_warning_label()
         footer_y_layout = QHBoxLayout(); footer_y_layout.addWidget(self.footer_y_input); footer_y_layout.addWidget(self.footer_y_warning_label)
-        grid.addWidget(QLabel(_("X Position:")), 3, 0, Qt.AlignRight); grid.addWidget(self.x_input, 3, 1); grid.addWidget(self.footer_x_input, 3, 2)
-        grid.addWidget(QLabel(_("Y Position:")), 4, 0, Qt.AlignRight); grid.addLayout(header_y_layout, 4, 1); grid.addLayout(footer_y_layout, 4, 2)
+        grid.addWidget(QLabel(self._("X Position:")), 3, 0, Qt.AlignRight); grid.addWidget(self.x_input, 3, 1); grid.addWidget(self.footer_x_input, 3, 2)
+        grid.addWidget(QLabel(self._("Y Position:")), 4, 0, Qt.AlignRight); grid.addLayout(header_y_layout, 4, 1); grid.addLayout(footer_y_layout, 4, 2)
 
-        self.left_btn = QPushButton(_("Left")); self.center_btn = QPushButton(_("Center")); self.right_btn = QPushButton(_("Right"))
+        self.left_btn = QPushButton(self._("Left")); self.center_btn = QPushButton(self._("Center")); self.right_btn = QPushButton(self._("Right"))
         header_align_layout = QHBoxLayout(); header_align_layout.addWidget(self.left_btn); header_align_layout.addWidget(self.center_btn); header_align_layout.addWidget(self.right_btn)
-        self.footer_left_btn = QPushButton(_("Left")); self.footer_center_btn = QPushButton(_("Center")); self.footer_right_btn = QPushButton(_("Right"))
+        self.footer_left_btn = QPushButton(self._("Left")); self.footer_center_btn = QPushButton(self._("Center")); self.footer_right_btn = QPushButton(self._("Right"))
         footer_align_layout = QHBoxLayout(); footer_align_layout.addWidget(self.footer_left_btn); footer_align_layout.addWidget(self.footer_center_btn); footer_align_layout.addWidget(self.footer_right_btn)
-        grid.addWidget(QLabel(_("Alignment:")), 5, 0, Qt.AlignRight); grid.addLayout(header_align_layout, 5, 1); grid.addLayout(footer_align_layout, 5, 2)
+        grid.addWidget(QLabel(self._("Alignment:")), 5, 0, Qt.AlignRight); grid.addLayout(header_align_layout, 5, 1); grid.addLayout(footer_align_layout, 5, 2)
 
-        grid.addWidget(QLabel(_("Global Footer Text:")), 6, 0, Qt.AlignRight)
-        self.global_footer_text = QLineEdit(_("Page {page} of {total}"))
-        self.global_footer_text.setToolTip(_("Use {page} for current page, {total} for total pages."))
-        self.apply_footer_template_button = QPushButton(_("Apply to All"))
+        # 页眉模板选择
+        grid.addWidget(QLabel(self._("Header Template:")), 6, 0, Qt.AlignRight)
+        self.header_template_combo = QComboBox()
+        self.header_template_combo.addItems([
+            self._("Custom"),
+            self._("Company Name"),
+            self._("Document Title"),
+            self._("Date"),
+            self._("Page Number"),
+            self._("Confidential"),
+            self._("Draft"),
+            self._("Final Version")
+        ])
+        self.header_template_combo.currentTextChanged.connect(self._on_header_template_changed)
+        grid.addWidget(self.header_template_combo, 6, 1, 1, 2)
+
+        grid.addWidget(QLabel(self._("Global Footer Text:")), 7, 0, Qt.AlignRight)
+        self.global_footer_text = QLineEdit(self._("Page {page} of {total}"))
+        self.global_footer_text.setToolTip(self._("Use {page} for current page, {total} for total pages."))
+        self.apply_footer_template_button = QPushButton(self._("Apply to All"))
         footer_template_layout = QHBoxLayout(); footer_template_layout.addWidget(self.global_footer_text); footer_template_layout.addWidget(self.apply_footer_template_button)
-        grid.addLayout(footer_template_layout, 6, 1, 1, 2)
+        grid.addLayout(footer_template_layout, 7, 1, 1, 2)
 
         # 新：预览区域横向长条，仅Header/Footer
         preview_group = QVBoxLayout()
-        preview_label = QLabel(_("Header/Footer Preview")); preview_label.setAlignment(Qt.AlignCenter)
+        preview_label = QLabel(self._("Header/Footer Preview")); preview_label.setAlignment(Qt.AlignCenter)
         self.preview_canvas = QLabel(); self.preview_canvas.setFixedSize(600, 360)
         self.preview_canvas.setStyleSheet("background: white; border: 1px solid #ccc;")
-        page_sel_layout = QHBoxLayout(); page_sel_layout.addWidget(QLabel(_("Page: ")))
+        page_sel_layout = QHBoxLayout(); page_sel_layout.addWidget(QLabel(self._("Page: ")))
         self.preview_page_spin = QSpinBox(); self.preview_page_spin.setRange(1, 9999); self.preview_page_spin.setValue(1)
         page_sel_layout.addWidget(self.preview_page_spin); page_sel_layout.addStretch()
         preview_group.addWidget(preview_label)
@@ -165,16 +479,22 @@ class MainWindow(QMainWindow):
         preview_group.addWidget(self.preview_canvas)
 
         # 结构化模式开关
-        self.structured_checkbox = QCheckBox(_("Structured mode (Acrobat-friendly)"))
+        self.structured_checkbox = QCheckBox(self._("Structured mode (Acrobat-friendly)"))
         self.structured_checkbox.setChecked(False)
-        grid.addWidget(self.structured_checkbox, 7, 0, 1, 3)
+        grid.addWidget(self.structured_checkbox, 8, 0, 1, 3)
 
         # 结构化中文选项
-        self.struct_cn_fixed_checkbox = QCheckBox(_("Structured CN: use fixed font"))
+        self.struct_cn_fixed_checkbox = QCheckBox(self._("Structured CN: use fixed font"))
         self.struct_cn_fixed_checkbox.setChecked(False)
         self.struct_cn_font_combo = QComboBox(); self.struct_cn_font_combo.addItems(get_system_fonts())
-        grid.addWidget(self.struct_cn_fixed_checkbox, 8, 0, 1, 1)
-        grid.addWidget(self.struct_cn_font_combo, 8, 1, 1, 2)
+        grid.addWidget(self.struct_cn_fixed_checkbox, 9, 0, 1, 1)
+        grid.addWidget(self.struct_cn_font_combo, 9, 1, 1, 2)
+
+        # 内存优化选项
+        self.memory_optimization_checkbox = QCheckBox(self._("Memory optimization (for large files)"))
+        self.memory_optimization_checkbox.setChecked(True)
+        self.memory_optimization_checkbox.setToolTip(self._("Enable chunked processing and memory cleanup for large PDF files"))
+        grid.addWidget(self.memory_optimization_checkbox, 10, 0, 1, 3)
 
         # 横向布局：设置控件 + 预览
         horizontal_layout = QHBoxLayout()
@@ -188,7 +508,7 @@ class MainWindow(QMainWindow):
         """创建文件列表及右侧的控制按钮"""
         layout = QHBoxLayout()
         self.file_table = QTableWidget(0, 6)
-        self.file_table.setHorizontalHeaderLabels([_("No."), _("Filename"), _("Size (MB)"), _("Page Count"), _("Header Text"), _("Footer Text")])
+        self.file_table.setHorizontalHeaderLabels([self._("No."), self._("Filename"), self._("Size (MB)"), self._("Page Count"), self._("Header Text"), self._("Footer Text")])
         self.file_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -199,27 +519,10 @@ class MainWindow(QMainWindow):
         # 在文件表格设置后添加右键菜单
         self._setup_context_menu()
         
-        # 预设按钮布局
-        preset_layout = QHBoxLayout()
-        preset_layout.addWidget(QLabel(_("预设位置:")))
-        
-        # 右上角预设按钮
-        self.top_right_btn = QPushButton(_("右上角"))
-        self.top_right_btn.clicked.connect(self._apply_top_right_preset)
-        preset_layout.addWidget(self.top_right_btn)
-        
-        # 右下角预设按钮  
-        self.bottom_right_btn = QPushButton(_("右下角"))
-        self.bottom_right_btn.clicked.connect(self._apply_bottom_right_preset)
-        preset_layout.addWidget(self.bottom_right_btn)
-        
-        preset_layout.addStretch()
-        main_layout.addLayout(preset_layout)
-        
         controls_layout = QVBoxLayout()
-        self.move_up_button = QPushButton(_("Move Up"))
-        self.move_down_button = QPushButton(_("Move Down"))
-        self.remove_button = QPushButton(_("Remove"))
+        self.move_up_button = QPushButton(self._("Move Up"))
+        self.move_down_button = QPushButton(self._("Move Down"))
+        self.remove_button = QPushButton(self._("Remove"))
         controls_layout.addStretch()
         controls_layout.addWidget(self.move_up_button)
         controls_layout.addWidget(self.move_down_button)
@@ -239,16 +542,16 @@ class MainWindow(QMainWindow):
         self.output_path_display = QLabel(default_download_path); self.output_path_display.setStyleSheet("color: grey;")
         self.output_folder = default_download_path
         
-        self.select_output_button = QPushButton(_("Select Output Folder"))
-        self.start_button = QPushButton(_("Start Processing")); self.start_button.setStyleSheet("font-weight: bold; padding: 5px;")
+        self.select_output_button = QPushButton(self._("Select Output Folder"))
+        self.start_button = QPushButton(self._("Start Processing")); self.start_button.setStyleSheet("font-weight: bold; padding: 5px;")
 
-        h_layout.addWidget(QLabel(_("Output Folder:"))); h_layout.addWidget(self.output_path_display, 1)
+        h_layout.addWidget(QLabel(self._("Output Folder:"))); h_layout.addWidget(self.output_path_display, 1)
         h_layout.addWidget(self.select_output_button); h_layout.addWidget(self.start_button)
         
         checkbox_layout = QHBoxLayout()
-        self.merge_checkbox = QCheckBox(_("Merge after processing"))
-        self.page_number_checkbox = QCheckBox(_("Add page numbers after merge"))
-        self.normalize_a4_checkbox = QCheckBox(_("Normalize to A4 (auto)"))
+        self.merge_checkbox = QCheckBox(self._("Merge after processing"))
+        self.page_number_checkbox = QCheckBox(self._("Add page numbers after merge"))
+        self.normalize_a4_checkbox = QCheckBox(self._("Normalize to A4 (auto)"))
         self.normalize_a4_checkbox.setChecked(True)
         checkbox_layout.addWidget(self.merge_checkbox); checkbox_layout.addWidget(self.page_number_checkbox)
         checkbox_layout.addWidget(self.normalize_a4_checkbox)
@@ -260,12 +563,12 @@ class MainWindow(QMainWindow):
         return layout
     
     def _create_warning_label(self) -> QLabel:
-        label = QLabel("⚠️"); label.setToolTip(_("This position is too close to the edge...")); label.setVisible(False)
+        label = QLabel("⚠️"); label.setToolTip(self._("This position is too close to the edge...")); label.setVisible(False)
         return label
 
     def _setup_menu(self):
-        menubar = self.menuBar(); help_menu = menubar.addMenu(_("Help"))
-        about_action = help_menu.addAction(_("About")); about_action.triggered.connect(self.show_about_dialog)
+        menubar = self.menuBar(); help_menu = menubar.addMenu(self._("Help"))
+        about_action = help_menu.addAction(self._("About")); about_action.triggered.connect(self.show_about_dialog)
 
     def _map_settings_to_widgets(self):
         """将设置项键名映射到UI控件，用于简化配置的存取"""
@@ -279,6 +582,7 @@ class MainWindow(QMainWindow):
             "normalize_a4": self.normalize_a4_checkbox,
             "structured_cn_fixed": self.struct_cn_fixed_checkbox,
             "structured_cn_font": self.struct_cn_font_combo,
+            "memory_optimization": self.memory_optimization_checkbox,
         }
 
     def _connect_signals(self):
@@ -307,7 +611,7 @@ class MainWindow(QMainWindow):
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox, self.struct_cn_fixed_checkbox, self.struct_cn_font_combo, self.preview_page_spin]
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox, self.struct_cn_fixed_checkbox, self.struct_cn_font_combo, self.memory_optimization_checkbox, self.preview_page_spin]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
             else:
@@ -389,7 +693,7 @@ class MainWindow(QMainWindow):
         if not index.isValid():
             return
         menu = QMenu(self)
-        unlock_action = menu.addAction("移除文件限制...")
+        unlock_action = menu.addAction(self._("移除文件限制..."))
         unlock_action.triggered.connect(lambda: self._attempt_unlock(index.row()))
         menu.exec(self.file_table.viewport().mapToGlobal(pos))
 
@@ -397,18 +701,18 @@ class MainWindow(QMainWindow):
         """尝试解密选定的PDF文件，并提供详细错误反馈"""
         item = self.file_items[row_index]
         if not self.output_folder:
-            QMessageBox.warning(self, _("Output Folder Not Set"), _("Please select an output folder..."))
+            QMessageBox.warning(self, self._("Output Folder Not Set"), self._("Please select an output folder..."))
             return
         encryption_status = getattr(item, "encryption_status", "ok")
         if encryption_status == "locked":
-            QMessageBox.warning(self, _("Locked File"), _("This file is encrypted and cannot be opened without a password."))
-            password, ok = QInputDialog.getText(self, _("Decrypt PDF"), f"{item.name}\n\n{_('Please enter the password:')}")
+            QMessageBox.warning(self, self._("Locked File"), self._("This file is encrypted and cannot be opened without a password."))
+            password, ok = QInputDialog.getText(self, self._("Decrypt PDF"), f"{item.name}\n\n{self._('Please enter the password:')}")
             if not ok:
                 return
         elif encryption_status == "restricted":
             response = QMessageBox.question(
-                self, _("Restricted PDF"),
-                _("This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?"),
+                self, self._("Restricted PDF"),
+                self._("This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?"),
                 QMessageBox.Yes | QMessageBox.No
             )
             if response == QMessageBox.No:
@@ -417,9 +721,9 @@ class MainWindow(QMainWindow):
             output_dir = self.output_folder
             result = self.controller.handle_unlock_pdf(item=item, password="", output_dir=output_dir)
             if result["success"]:
-                QMessageBox.information(self, _("Unlock Success"), result["message"])
+                QMessageBox.information(self, self._("Unlock Success"), result["message"])
                 if result.get("output_path"):
-                    self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                    self.progress_label.setText(self._("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
                     self.output_path_display.setText(output_dir)
                     new_items = self.controller.handle_file_import([result["output_path"]])
                     if new_items:
@@ -427,7 +731,7 @@ class MainWindow(QMainWindow):
                         self.file_items[row_index] = new_items[0]
                         self._populate_table_from_items()
             else:
-                self.show_error(_("Unlock Failed"), Exception(result["message"]))
+                self.show_error(self._("Unlock Failed"), Exception(result["message"]))
             return
         else:
             return  # Not encrypted or already handled
@@ -438,10 +742,10 @@ class MainWindow(QMainWindow):
             output_dir = self.output_folder
             result = self.controller.handle_unlock_pdf(item=item, password=password, output_dir=output_dir)
             if result["success"]:
-                QMessageBox.information(self, _("Unlock Success"), result["message"])
+                QMessageBox.information(self, self._("Unlock Success"), result["message"])
                 if result.get("output_path"):
                     # Show unlock file path in progress label
-                    self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                    self.progress_label.setText(self._("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
                     self.output_path_display.setText(output_dir)
                     new_items = self.controller.handle_file_import([result["output_path"]])
                     if new_items:
@@ -453,18 +757,18 @@ class MainWindow(QMainWindow):
                 attempts -= 1
                 if attempts == 0:
                     choice = QMessageBox.question(
-                        self, _("Unlock Failed"),
-                        _("Password incorrect. Would you like to attempt forced unlock without password?"),
+                        self, self._("Unlock Failed"),
+                        self._("Password incorrect. Would you like to attempt forced unlock without password?"),
                         QMessageBox.Yes | QMessageBox.No
                     )
                     if choice == QMessageBox.Yes:
                         output_dir = self.output_folder
                         result = self.controller.handle_unlock_pdf(item=item, password="", output_dir=output_dir)
                         if result["success"]:
-                            QMessageBox.information(self, _("Unlock Success"), result["message"])
+                            QMessageBox.information(self, self._("Unlock Success"), result["message"])
                             if result.get("output_path"):
                                 # Show unlock file path in progress label
-                                self.progress_label.setText(_("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
+                                self.progress_label.setText(self._("Unlocked file saved to: ") + result.get("output_path", "") + " (" + output_dir + ")")
                                 self.output_path_display.setText(output_dir)
                                 new_items = self.controller.handle_file_import([result["output_path"]])
                                 if new_items:
@@ -472,10 +776,10 @@ class MainWindow(QMainWindow):
                                     self.file_items[row_index] = new_items[0]
                                     self._populate_table_from_items()
                         else:
-                            self.show_error(_("Unlock Failed"), Exception(result["message"]))
+                            self.show_error(self._("Unlock Failed"), Exception(result["message"]))
                     return
                 else:
-                    password, ok = QInputDialog.getText(self, _("Retry Password"), f"{item.name}\n\n{_('Incorrect password. Try again:')}")
+                    password, ok = QInputDialog.getText(self, self._("Retry Password"), f"{item.name}\n\n{self._('Incorrect password. Try again:')}")
                     if not ok:
                         return
 
@@ -497,8 +801,23 @@ class MainWindow(QMainWindow):
         """处理页眉模式切换，并清理UI状态"""
         modes = [self.MODE_FILENAME, self.MODE_AUTO_NUMBER, self.MODE_CUSTOM]
         self.mode = modes[index]
+        
+        # 显示/隐藏自动编号设置组
         self.auto_number_group.setVisible(self.mode == self.MODE_AUTO_NUMBER)
-        if self.mode != self.MODE_AUTO_NUMBER: self._reset_auto_number_fields()
+        
+        # 根据模式启用/禁用相关控件
+        if self.mode == self.MODE_AUTO_NUMBER:
+            # 自动编号模式：启用自动编号控件，禁用页眉文本编辑
+            self.auto_number_group.setEnabled(True)
+            # 这里可以添加禁用页眉文本编辑的逻辑
+        elif self.mode == self.MODE_FILENAME:
+            # 文件名模式：禁用自动编号控件
+            self.auto_number_group.setEnabled(False)
+        else:  # 自定义模式
+            # 自定义模式：禁用自动编号控件
+            self.auto_number_group.setEnabled(False)
+            self._reset_auto_number_fields()
+            
         self.update_header_texts()
 
     def update_header_texts(self):
@@ -515,7 +834,7 @@ class MainWindow(QMainWindow):
 
     def import_files(self):
         """打开文件对话框以导入PDF文件"""
-        paths, _ = QFileDialog.getOpenFileNames(self, _("Select PDF Files or Folders"), "", "PDF Files (*.pdf)")
+        paths, _ = QFileDialog.getOpenFileNames(self, self._("Select PDF Files or Folders"), "", "PDF Files (*.pdf)")
         if paths: self._process_imported_paths(paths)
 
     def clear_file_list(self):
@@ -553,7 +872,7 @@ class MainWindow(QMainWindow):
 
     def select_output_folder(self):
         """选择输出文件夹"""
-        folder = QFileDialog.getExistingDirectory(self, _("Select Output Directory"))
+        folder = QFileDialog.getExistingDirectory(self, self._("Select Output Directory"))
         if folder: self.output_path_display.setText(folder); self.output_folder = folder
 
     def move_item_up(self):
@@ -583,10 +902,10 @@ class MainWindow(QMainWindow):
     def start_processing(self):
         """开始批处理流程"""
         if not self.file_items:
-            QMessageBox.warning(self, _("No Files"), _("Please import PDF files first."))
+            QMessageBox.warning(self, self._("No Files"), self._("Please import PDF files first."))
             return
         if not self.output_folder:
-            QMessageBox.warning(self, _("No Output Folder"), _("Please select an output folder."))
+            QMessageBox.warning(self, self._("No Output Folder"), self._("Please select an output folder."))
             return
 
         # 先同步 file_items 的 header_text 和 footer_text
@@ -620,7 +939,7 @@ class MainWindow(QMainWindow):
             header_settings['normalize_a4'] = True
             footer_settings['normalize_a4'] = True
 
-        self.progress_label.setText(_("Processing... (0%)"))
+        self.progress_label.setText(self._("Processing... (0%)"))
         self.thread = QThread()
         self.worker = Worker(self.controller, self.file_items, self.output_folder, header_settings, footer_settings)
         self.worker.moveToThread(self.thread)
@@ -634,10 +953,10 @@ class MainWindow(QMainWindow):
     def _check_for_encrypted_files(self) -> bool:
         encrypted = [item.name for item in self.file_items if getattr(item, "encryption_status", None) != EncryptionStatus.OK]
         if encrypted:
-            msg = _("The following files are encrypted or restricted:") + "\n\n"
+            msg = self._("The following files are encrypted or restricted:") + "\n\n"
             msg += "\n".join(f"- {name}" for name in encrypted)
-            msg += "\n\n" + _("Please unlock them using the right-click menu before processing.")
-            QMessageBox.warning(self, _("Encrypted Files Detected"), msg)
+            msg += "\n\n" + self._("Please unlock them using the right-click menu before processing.")
+            QMessageBox.warning(self, self._("Encrypted Files Detected"), msg)
             return False
         return True
 
@@ -646,13 +965,13 @@ class MainWindow(QMainWindow):
         self.processed_paths = [res["output"] for res in results if res["success"]]
         failed = [res for res in results if not res["success"]]
 
-        self.progress_label.setText(_("Completed {} files").format(len(self.processed_paths)))
+        self.progress_label.setText(self._("Completed {} files").format(len(self.processed_paths)))
 
         if failed:
             msg = "\n".join([f"{os.path.basename(res['input'])}: {res['error']}" for res in failed])
-            QMessageBox.warning(self, _("Some Files Failed"), msg)
+            QMessageBox.warning(self, self._("Some Files Failed"), msg)
         else:
-            QMessageBox.information(self, _("Done"), _("All files processed successfully."))
+            QMessageBox.information(self, self._("Done"), self._("All files processed successfully."))
             self.progress_label.setText("")
 
         if self.merge_checkbox.isChecked() and self.processed_paths:
@@ -664,25 +983,25 @@ class MainWindow(QMainWindow):
 
     def handle_merge_confirmation(self, ordered_paths: list):
         """处理合并确认后的逻辑，包含统一的成功/失败提示"""
-        save_path, _ = QFileDialog.getSaveFileName(self, _("Save Merged PDF"), "", "PDF Files (*.pdf)")
+        save_path, _ = QFileDialog.getSaveFileName(self, self._("Save Merged PDF"), "", "PDF Files (*.pdf)")
         if not save_path: return
         
         try:
             success, err = merge_pdfs(ordered_paths, save_path)
             if not success: raise Exception(err)
 
-            final_message = _("Files merged successfully and saved to:\n") + save_path
+            final_message = self._("Files merged successfully and saved to:\n") + save_path
             if self.page_number_checkbox.isChecked():
                 add_page_numbers(
                     input_pdf=save_path, output_pdf=save_path,
                     font_name=self.footer_font_select.currentText(), font_size=self.footer_font_size_spin.value(),
                     x=self.footer_x_input.value(), y=self.footer_y_input.value()
                 )
-                final_message = _("Files merged and page numbers added successfully:\n") + save_path
+                final_message = self._("Files merged and page numbers added successfully:\n") + save_path
             
-            QMessageBox.information(self, _("Success"), final_message)
+            QMessageBox.information(self, self._("Success"), final_message)
         except Exception as e:
-            self.show_error(_("Operation Failed"), e)
+            self.show_error(self._("Operation Failed"), e)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls(): event.acceptProposedAction()
@@ -693,7 +1012,7 @@ class MainWindow(QMainWindow):
         urls = event.mimeData().urls()
         paths = [url.toLocalFile() for url in urls if url.isLocalFile() and url.toLocalFile().lower().endswith('.pdf')]
         
-        if not paths: QMessageBox.warning(self, _("Invalid Files"), _("Only PDF files can be imported.")); return
+        if not paths: QMessageBox.warning(self, self._("Invalid Files"), self._("Only PDF files can be imported.")); return
         self._process_imported_paths(paths)
         event.acceptProposedAction()
 
@@ -715,71 +1034,150 @@ class MainWindow(QMainWindow):
             if locked_files or restricted_files:
                 msg = ""
                 if locked_files:
-                    msg += _("The following files are fully encrypted and require a password:\n") + "\n".join(f"• {f}" for f in locked_files) + "\n\n"
+                    msg += self._("The following files are fully encrypted and require a password:\n") + "\n".join(f"• {f}" for f in locked_files) + "\n\n"
                 if restricted_files:
-                    msg += _("The following files are restricted (e.g., can't be modified):\n") + "\n".join(f"• {f}" for f in restricted_files)
-                QMessageBox.information(self, _("Encrypted Files Notice"), msg.strip())
+                    msg += self._("The following files are restricted (e.g., can't be modified):\n") + "\n".join(f"• {f}" for f in restricted_files)
+                QMessageBox.information(self, self._("Encrypted Files Notice"), msg.strip())
 
         except Exception as e:
-            self.show_error(_("Failed to import files"), e)
+            self.show_error(self._("Failed to import files"), e)
 
     def update_preview(self):
-        """真实渲染选中页背景，并叠加页眉/页脚；检测与文本块重叠并高亮"""
+        """显示页眉和页脚的条状预览，模拟PDF页面布局"""
         row = self.file_table.currentRow()
-        if row < 0 or row >= len(self.file_items) or fitz is None:
-            # fallback 到旧预览（简化处理）
-            pixmap = QPixmap(600, 360); pixmap.fill(Qt.white)
-            p = QPainter(pixmap); p.setPen(QPen(Qt.gray)); p.drawText(20, 40, _("No preview")); p.end()
-            self.preview_canvas.setPixmap(pixmap); return
-        try:
-            path = self.file_items[row].path
-            doc = fitz.open(path)
-            page_index = max(0, min(self.preview_page_spin.value()-1, len(doc)-1))
-            page = doc[page_index]
-            mat = fitz.Matrix(1.2, 1.2)  # 放大一点
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
-            canvas = QPixmap.fromImage(img.copy())
-            p = QPainter(canvas)
-            settings = self._get_current_settings()
-            # 文本
-            header_text = self.file_table.item(row, 4).text() if self.file_table.item(row, 4) else ""
-            footer_text = self.file_table.item(row, 5).text() if self.file_table.item(row, 5) else ""
-            # 坐标缩放（pt -> 设备像素）
-            page_w_pt = page.rect.width; scale_x = canvas.width() / max(page_w_pt, 1)
-            header_x = int(int(settings.get("header_x", 21)) * scale_x)
-            footer_x = int(int(settings.get("footer_x", 21)) * scale_x)
-            # Y 直接用 pt 比例近似（高略有偏差可接受）
-            header_y = int((page.rect.height - int(settings.get("header_y", 28))) * (canvas.height() / page.rect.height))
-            footer_y = int(int(settings.get("footer_y", 28)) * (canvas.height() / page.rect.height))
-            # 绘制文本
-            p.setPen(QPen(Qt.black))
-            p.setFont(QFont(settings.get("header_font_name", "Helvetica"), max(int(settings.get("header_font_size", 14)), 8)))
-            p.drawText(header_x, max(20, header_y), header_text[:60])
-            p.setPen(QPen(Qt.darkGray))
-            p.setFont(QFont(settings.get("footer_font_name", "Helvetica"), max(int(settings.get("footer_font_size", 14)), 8)))
-            p.drawText(footer_x, min(canvas.height()-20, canvas.height()-footer_y), footer_text[:60])
-            # 遮挡检测：扫描页 spans bbox 与 header/footer 近邻区域相交则高亮
-            p.setPen(QPen(Qt.red, 2, Qt.SolidLine))
-            spans = page.get_text("dict").get("blocks", [])
-            def _overlap(r1, r2):
-                return not (r1[2] < r2[0] or r2[2] < r1[0] or r1[3] < r2[1] or r2[3] < r1[1])
-            # 构造大致的 header/footer 区域（像素）
-            h_box = (header_x, max(0, header_y-20), min(canvas.width(), header_x+300), header_y+10)
-            f_box = (footer_x, canvas.height()-footer_y-10, min(canvas.width(), footer_x+300), canvas.height()-footer_y+20)
-            for blk in spans:
-                for line in blk.get("lines", []):
-                    for sp in line.get("spans", []):
-                        x0, y0, x1, y1 = sp["bbox"]
-                        # 转像素
-                        r = (int(x0*scale_x), int(y0*(canvas.height()/page.rect.height)), int(x1*scale_x), int(y1*(canvas.height()/page.rect.height)))
-                        if _overlap(r, h_box) or _overlap(r, f_box):
-                            p.drawRect(*r)
+        if row < 0 or row >= len(self.file_items):
+            # 无文件时的预览
+            pixmap = QPixmap(600, 360)
+            pixmap.fill(Qt.white)
+            p = QPainter(pixmap)
+            p.setPen(QPen(Qt.gray))
+            p.drawText(20, 40, self._("No preview"))
             p.end()
-            self.preview_canvas.setPixmap(canvas)
-        except Exception:
-            pixmap = QPixmap(600, 360); pixmap.fill(Qt.white)
-            p = QPainter(pixmap); p.setPen(QPen(Qt.gray)); p.drawText(20, 40, _("Preview failed")); p.end()
+            self.preview_canvas.setPixmap(pixmap)
+            return
+            
+        try:
+            # 创建预览画布
+            pixmap = QPixmap(600, 360)
+            pixmap.fill(Qt.white)
+            p = QPainter(pixmap)
+            
+            # 设置字体
+            header_font = QFont("Arial", 14)
+            footer_font = QFont("Arial", 14)
+            p.setFont(header_font)
+            
+            # 获取当前设置
+            settings = self._get_current_settings()
+            
+            # 获取页眉页脚文本，优先从表格获取
+            header_text = ""
+            footer_text = ""
+            
+            if self.file_table.item(row, 4):
+                header_text = self.file_table.item(row, 4).text()
+            elif hasattr(self.file_items[row], 'header_text'):
+                header_text = self.file_items[row].header_text or ""
+                
+            if self.file_table.item(row, 5):
+                footer_text = self.file_table.item(row, 5).text()
+            elif hasattr(self.file_items[row], 'footer_text'):
+                footer_text = self.file_items[row].footer_text or ""
+            
+            # 绘制页面背景（模拟A4页面）
+            page_width = 595  # A4宽度 (pt)
+            page_height = 842  # A4高度 (pt)
+            scale = min(500 / page_width, 300 / page_height)  # 缩放以适应预览区域
+            
+            scaled_width = int(page_width * scale)
+            scaled_height = int(page_height * scale)
+            start_x = (600 - scaled_width) // 2
+            start_y = (360 - scaled_height) // 2
+            
+            # 绘制页面边框
+            p.setPen(QPen(Qt.black, 1))
+            p.drawRect(start_x, start_y, scaled_width, scaled_height)
+            
+            # 绘制页眉区域（顶部条状）
+            header_y = start_y + 20
+            header_height = 30
+            p.setPen(QPen(Qt.blue, 2))
+            p.setBrush(QBrush(QColor(200, 200, 255, 100)))  # 半透明蓝色
+            p.drawRect(start_x, header_y, scaled_width, header_height)
+            
+            # 绘制页眉文本
+            if header_text:
+                p.setPen(Qt.blue)
+                p.setFont(header_font)
+                # 计算页眉位置（基于设置）
+                header_x = start_x + int(settings.get("header_x", 50) * scale)
+                header_y_text = header_y + 20
+                
+                # 计算文本宽度，从右到左定位（右对齐）
+                text_width = p.fontMetrics().horizontalAdvance(header_text[:50])
+                if settings.get("header_alignment", "left") == "right":
+                    header_x = start_x + scaled_width - text_width - 20  # 右对齐，留20pt边距
+                elif settings.get("header_alignment", "left") == "center":
+                    header_x = start_x + (scaled_width - text_width) // 2  # 居中
+                
+                p.drawText(header_x, header_y_text, header_text[:50])  # 限制文本长度
+                
+                # 绘制页眉位置指示器
+                p.setPen(QPen(Qt.blue, 2))
+                p.drawLine(header_x, header_y + header_height, header_x, header_y + header_height + 10)
+                p.drawText(header_x - 20, header_y + header_height + 25, f"X:{settings.get('header_x', 50)}")
+            
+            # 绘制页脚区域（底部条状）
+            footer_y = start_y + scaled_height - 50
+            footer_height = 30
+            p.setPen(QPen(Qt.red, 2))
+            p.setBrush(QBrush(QColor(255, 200, 200, 100)))  # 半透明红色
+            p.drawRect(start_x, footer_y, scaled_width, footer_height)
+            
+            # 绘制页脚文本
+            if footer_text:
+                p.setPen(Qt.red)
+                p.setFont(footer_font)
+                # 计算页脚位置（基于设置）
+                footer_x = start_x + int(settings.get("footer_x", 400) * scale)
+                footer_y_text = footer_y + 20
+                
+                # 计算文本宽度，从右到左定位（右对齐）
+                text_width = p.fontMetrics().horizontalAdvance(footer_text[:50])
+                if settings.get("footer_alignment", "left") == "right":
+                    footer_x = start_x + scaled_width - text_width - 20  # 右对齐，留20pt边距
+                elif settings.get("footer_alignment", "left") == "center":
+                    footer_x = start_x + (scaled_width - text_width) // 2  # 居中
+                
+                p.drawText(footer_x, footer_y_text, footer_text[:50])  # 限制文本长度
+                
+                # 绘制页脚位置指示器
+                p.setPen(QPen(Qt.red, 2))
+                p.drawLine(footer_x, footer_y, footer_x, footer_y - 10)
+                p.drawText(footer_x - 20, footer_y - 15, f"Y:{settings.get('footer_y', 50)}")
+            
+            # 绘制坐标信息
+            p.setPen(Qt.black)
+            p.setFont(QFont("Arial", 10))
+            info_text = f"Header: ({settings.get('header_x', 50)}, {settings.get('header_y', 800)}) | Footer: ({settings.get('footer_x', 400)}, {settings.get('footer_y', 50)})"
+            p.drawText(10, 350, info_text)
+            
+            # 绘制单位信息
+            unit = self.unit_combo.currentText()
+            p.drawText(10, 340, f"Unit: {unit}")
+            
+            p.end()
+            self.preview_canvas.setPixmap(pixmap)
+            
+        except Exception as e:
+            # 预览失败时的fallback
+            pixmap = QPixmap(600, 360)
+            pixmap.fill(Qt.white)
+            p = QPainter(pixmap)
+            p.setPen(QPen(Qt.gray))
+            p.drawText(20, 40, self._("Preview failed"))
+            p.drawText(20, 60, f"Error: {str(e)}")
+            p.end()
             self.preview_canvas.setPixmap(pixmap)
 
     def _validate_positions(self):
@@ -809,7 +1207,7 @@ class MainWindow(QMainWindow):
                     elif isinstance(widget, QCheckBox): widget.setChecked(settings[key])
             self.update_preview()
         except Exception as e:
-            self.show_error(_("Failed to apply settings due to an error. Please check the logs."), e)
+            self.show_error(self._("Failed to apply settings due to an error. Please check the logs."), e)
 
     def closeEvent(self, event):
         """在关闭应用前保存设置"""
@@ -821,21 +1219,21 @@ class MainWindow(QMainWindow):
         """显示错误信息对话框和日志，增强日志记录"""
         self.progress_label.setText(message)
         if exception: logger.error(f"UI Error: '{message}'", exc_info=True)
-        QMessageBox.critical(self, _("Error"), f"{message}\n\n{str(exception or '')}")
+        QMessageBox.critical(self, self._("Error"), f"{message}\n\n{str(exception or '')}")
     
     def update_progress(self, current: int, total: int, filename: str):
         """更新进度条标签"""
         percent = int((current / total) * 100)
-        self.progress_label.setText(f"{_('Processing...')} ({percent}%) - {filename}")
+        self.progress_label.setText(self._("Processing... ") + f"({percent}%) - {filename}")
     
     def show_about_dialog(self):
         """显示关于对话框"""
         QMessageBox.about(
-            self, "About DocDeck",
-            "DocDeck - PDF Header & Footer Tool\n"
-            f"Version {__import__('config').config.APP_VERSION}\n\n"
-            "Author: 木小樨\n"
-            "Project Homepage:\n"
+            self, self._("About DocDeck"),
+            self._("DocDeck - PDF Header & Footer Tool\n") +
+            f"Version {__import__('config').config.APP_VERSION}\n\n" +
+            self._("Author: 木小樨\n") +
+            self._("Project Homepage:\n") +
             "https://hs2wxdogy2.feishu.cn/wiki/Kjv3wQfV5iKpGXkQ8aCcOkj6nVf"
         )
 
@@ -853,11 +1251,11 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         
         # 读取现有页眉/页脚
-        read_action = menu.addAction(_("读取现有页眉/页脚"))
+        read_action = menu.addAction(self._("读取现有页眉/页脚"))
         read_action.triggered.connect(lambda: self._read_existing_headers_footers(row))
         
         # 删除文件
-        delete_action = menu.addAction(_("删除"))
+        delete_action = menu.addAction(self._("删除"))
         delete_action.triggered.connect(lambda: self._delete_file(row))
         
         menu.exec_(self.file_table.mapToGlobal(position))
@@ -869,15 +1267,15 @@ class MainWindow(QMainWindow):
             
         file_path = self.file_items[row].path
         try:
-            from pdf_utils import extract_artifact_headers_footers
-            result = extract_artifact_headers_footers(file_path, max_pages=3)
+            from pdf_utils import extract_all_headers_footers
+            result = extract_all_headers_footers(file_path, max_pages=5)
             
             if not result or not result.get("pages"):
-                QMessageBox.information(self, _("读取结果"), _("未检测到现有的结构化页眉/页脚"))
+                QMessageBox.information(self, self._("读取结果"), self._("未检测到现有的页眉/页脚"))
                 return
                 
             # 构建显示内容
-            content = _("检测到以下页眉/页脚内容：\n\n")
+            content = self._("检测到以下页眉/页脚内容：\n\n")
             for page_info in result["pages"]:
                 content += f"第 {page_info['page']} 页:\n"
                 if page_info.get("header"):
@@ -886,16 +1284,40 @@ class MainWindow(QMainWindow):
                     content += f"  页脚: {', '.join(page_info['footer'])}\n"
                 content += "\n"
             
-            # 询问用户操作
+            # 创建更详细的对话框
             msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(_("现有页眉/页脚"))
+            msg_box.setWindowTitle(self._("现有页眉/页脚"))
             msg_box.setText(content)
-            msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg_box.setInformativeText(_("点击确定关闭"))
+            msg_box.setStandardButtons(
+                QMessageBox.StandardButton.Ok | 
+                QMessageBox.StandardButton.Cancel
+            )
+            msg_box.setInformativeText(self._("检测结果包含结构化标签和启发式识别的页眉/页脚"))
+            
+            # 添加操作按钮
+            if result["pages"]:
+                # 尝试自动识别页眉页脚文本
+                all_headers = []
+                all_footers = []
+                for page_info in result["pages"]:
+                    all_headers.extend(page_info.get("header", []))
+                    all_footers.extend(page_info.get("footer", []))
+                
+                if all_headers:
+                    most_common_header = max(set(all_headers), key=all_headers.count)
+                    msg_box.setDetailedText(f"建议页眉: {most_common_header}")
+                
+                if all_footers:
+                    most_common_footer = max(set(all_footers), key=all_footers.count)
+                    if msg_box.detailedText():
+                        msg_box.setDetailedText(msg_box.detailedText() + f"\n建议页脚: {most_common_footer}")
+                    else:
+                        msg_box.setDetailedText(f"建议页脚: {most_common_footer}")
+            
             msg_box.exec_()
             
         except Exception as e:
-            QMessageBox.warning(self, _("读取失败"), f"{_('读取现有页眉/页脚失败')}: {str(e)}")
+            QMessageBox.warning(self, self._("读取失败"), f"{self._('读取现有页眉/页脚失败')}: {str(e)}")
 
     def _delete_file(self, row):
         """删除指定文件"""
@@ -903,8 +1325,8 @@ class MainWindow(QMainWindow):
             return
             
         reply = QMessageBox.question(
-            self, _("确认删除"), 
-            f"{_('确定要删除文件')} '{self.file_items[row].name}' {_('吗？')}",
+            self, self._("确认删除"), 
+            f"{self._('确定要删除文件')} '{self.file_items[row].name}' {self._('吗？')}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
@@ -913,12 +1335,120 @@ class MainWindow(QMainWindow):
             self._update_file_table()
             self.update_preview()
 
+    def _on_unit_changed(self, unit: str):
+        """单位改变时转换所有位置值"""
+        if not hasattr(self, '_last_unit') or not self._last_unit:
+            self._last_unit = unit
+            return
+            
+        old_unit = self._last_unit
+        self._last_unit = unit
+        
+        # 转换页眉位置
+        old_x = self.x_input.value()
+        old_y = self.y_input.value()
+        new_x = self._convert_unit(old_x, old_unit, unit)
+        new_y = self._convert_unit(old_y, old_unit, unit)
+        
+        # 暂时断开信号连接避免循环调用
+        self.x_input.blockSignals(True)
+        self.y_input.blockSignals(True)
+        self.x_input.setValue(int(new_x))
+        self.y_input.setValue(int(new_y))
+        self.x_input.blockSignals(False)
+        self.y_input.blockSignals(False)
+        
+        # 转换页脚位置
+        old_x = self.footer_x_input.value()
+        old_y = self.footer_y_input.value()
+        new_x = self._convert_unit(old_x, old_unit, unit)
+        new_y = self._convert_unit(old_y, old_unit, unit)
+        
+        self.footer_x_input.blockSignals(True)
+        self.footer_y_input.blockSignals(True)
+        self.footer_x_input.setValue(int(new_x))
+        self.footer_y_input.setValue(int(new_y))
+        self.footer_x_input.blockSignals(False)
+        self.footer_y_input.blockSignals(False)
+        
+        # 更新标签显示
+        self._update_position_labels()
+        
+        # 更新预览
+        self.update_preview()
+
+    def _convert_unit(self, value: float, from_unit: str, to_unit: str) -> float:
+        """转换单位：pt <-> cm <-> mm"""
+        # 先转换为pt
+        pt_value = value
+        if from_unit == "cm":
+            pt_value = value * 28.35
+        elif from_unit == "mm":
+            pt_value = value * 2.835
+        
+        # 从pt转换为目标单位
+        if to_unit == "pt":
+            return pt_value
+        elif to_unit == "cm":
+            return pt_value / 28.35
+        elif to_unit == "mm":
+            return pt_value / 2.835
+        return pt_value
+
+    def _update_position_labels(self):
+        """更新位置标签显示当前单位"""
+        unit = self.unit_combo.currentText()
+        self.x_input.setToolTip(self._("X Position in ") + unit)
+        self.y_input.setToolTip(self._("Y Position in ") + unit)
+        self.footer_x_input.setToolTip(self._("Footer X Position in ") + unit)
+        self.footer_y_input.setToolTip(self._("Footer Y Position in ") + unit)
+
+    def _on_header_template_changed(self, template: str):
+        """页眉模板改变时的处理"""
+        if template == self._("Custom"):
+            return  # 保持当前自定义文本
+        
+        # 根据模板设置文本
+        if self.language_map.get("单位:") == "单位:":  # 中文界面
+            template_texts = {
+                self._("Company Name"): "公司名称",
+                self._("Document Title"): "文档标题",
+                self._("Date"): "{date}",
+                self._("Page Number"): "第 {page} 页",
+                self._("Confidential"): "机密文件",
+                self._("Draft"): "草稿",
+                self._("Final Version"): "最终版"
+            }
+        else:  # 英文界面
+            template_texts = {
+                self._("Company Name"): "Company Name",
+                self._("Document Title"): "Document Title",
+                self._("Date"): "{date}",
+                self._("Page Number"): "Page {page}",
+                self._("Confidential"): "Confidential",
+                self._("Draft"): "Draft",
+                self._("Final Version"): "Final Version"
+            }
+        
+        if template in template_texts:
+            # 找到页眉文本输入框并设置值
+            # 注意：这里需要根据实际的UI结构调整
+            # 暂时使用全局页眉文本
+            if hasattr(self, 'header_text_input'):
+                self.header_text_input.setText(template_texts[template])
+            elif hasattr(self, 'global_header_text'):
+                self.global_header_text.setText(template_texts[template])
+            
+            # 更新预览
+            self.update_preview()
+
     def _apply_top_right_preset(self):
         """应用右上角预设位置"""
+        unit = self.unit_combo.currentText()
+        
         # 计算右上角位置：距右边0.3cm，距上边0.8cm
-        # 1cm ≈ 28.35pt
-        right_margin = int(0.3 * 28.35)  # 0.3cm to pt
-        top_margin = int(0.8 * 28.35)    # 0.8cm to pt
+        right_margin = 0.3  # cm
+        top_margin = 0.8    # cm
         
         # 获取当前选中文件的实际页面尺寸来计算X位置
         row = self.file_table.currentRow()
@@ -929,25 +1459,36 @@ class MainWindow(QMainWindow):
                 if len(doc) > 0:
                     page = doc[0]
                     page_width = page.rect.width
+                    # 转换页面宽度到当前单位
+                    page_width_unit = self._convert_unit(page_width, "pt", unit)
                     # X = 页面宽度 - 右边距 - 预估文本宽度
-                    # 假设文本宽度约为字体大小 * 字符数 * 0.6
-                    font_size = self.header_size_spin.value()
+                    font_size = self.font_size_spin.value()
                     estimated_text_width = font_size * 0.6 * 20  # 假设20个字符
-                    x = int(page_width - right_margin - estimated_text_width)
-                    self.header_x_spin.setValue(max(0, x))
+                    x = page_width_unit - right_margin - estimated_text_width
+                    self.x_input.setValue(max(0, int(x)))
                 doc.close()
             except:
                 # 如果无法获取页面尺寸，使用默认值
-                self.header_x_spin.setValue(500)  # 默认靠右
+                self.x_input.setValue(500)
         
-        self.header_y_spin.setValue(int(842 - top_margin))  # A4高度 - 上边距
-        self.header_size_spin.setValue(14)  # 14号字体
+        # 设置Y位置（距上边0.8cm）
+        if unit == "pt":
+            y = 842 - (top_margin * 28.35)  # A4高度 - 上边距
+        elif unit == "cm":
+            y = 29.7 - top_margin  # A4高度29.7cm - 上边距
+        else:  # mm
+            y = 297 - (top_margin * 10)  # A4高度297mm - 上边距
+        
+        self.y_input.setValue(int(y))
+        self.font_size_spin.setValue(14)  # 14号字体
 
     def _apply_bottom_right_preset(self):
         """应用右下角预设位置"""
+        unit = self.unit_combo.currentText()
+        
         # 计算右下角位置：距右边0.3cm，距下边0.8cm
-        right_margin = int(0.3 * 28.35)  # 0.3cm to pt
-        bottom_margin = int(0.8 * 28.35) # 0.8cm to pt
+        right_margin = 0.3  # cm
+        bottom_margin = 0.8 # cm
         
         # 获取当前选中文件的实际页面尺寸来计算X位置
         row = self.file_table.currentRow()
@@ -958,14 +1499,24 @@ class MainWindow(QMainWindow):
                 if len(doc) > 0:
                     page = doc[0]
                     page_width = page.rect.width
+                    # 转换页面宽度到当前单位
+                    page_width_unit = self._convert_unit(page_width, "pt", unit)
                     # X = 页面宽度 - 右边距 - 预估文本宽度
-                    font_size = self.footer_size_spin.value()
+                    font_size = self.footer_font_size_spin.value()
                     estimated_text_width = font_size * 0.6 * 20
-                    x = int(page_width - right_margin - estimated_text_width)
-                    self.footer_x_spin.setValue(max(0, x))
+                    x = page_width_unit - right_margin - estimated_text_width
+                    self.footer_x_input.setValue(max(0, int(x)))
                 doc.close()
             except:
-                self.footer_x_spin.setValue(500)
+                self.footer_x_input.setValue(500)
         
-        self.footer_y_spin.setValue(int(bottom_margin))  # 下边距
-        self.footer_size_spin.setValue(14)  # 14号字体
+        # 设置Y位置（距下边0.8cm）
+        if unit == "pt":
+            y = bottom_margin * 28.35  # 下边距
+        elif unit == "cm":
+            y = bottom_margin  # 下边距
+        else:  # mm
+            y = bottom_margin * 10  # 下边距
+        
+        self.footer_y_input.setValue(int(y))
+        self.footer_font_size_spin.setValue(14)  # 14号字体

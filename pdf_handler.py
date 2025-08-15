@@ -122,12 +122,26 @@ def _build_overlay_pdf_bytes(page_width: float, page_height: float, text: str, f
     """用 ReportLab 生成一页 PDF（含嵌入字体），返回字节，用于作为 Form XObject 导入。"""
     packet = BytesIO()
     can = canvas.Canvas(packet, pagesize=(page_width, page_height))
+    
+    # 改进的字体处理
     if register_font_safely(font_name):
         can.setFont(font_name, font_size)
     else:
-        fallback_font = "Helvetica"
-        logger.warning(f"[Structured CN] Font '{font_name}' not found, fallback to {fallback_font}.")
-        can.setFont(fallback_font, font_size)
+        # 尝试常见的中文字体
+        chinese_fonts = ["SimSun", "SimHei", "Microsoft YaHei", "PingFang SC", "STSong", "STHeiti"]
+        font_found = False
+        for chinese_font in chinese_fonts:
+            if register_font_safely(chinese_font):
+                can.setFont(chinese_font, font_size)
+                font_found = True
+                logger.info(f"[Structured CN] Using fallback Chinese font: {chinese_font}")
+                break
+        
+        if not font_found:
+            fallback_font = "Helvetica"
+            logger.warning(f"[Structured CN] No Chinese fonts found, fallback to {fallback_font}.")
+            can.setFont(fallback_font, font_size)
+    
     can.drawString(x, y, text)
     can.save()
     return packet.getvalue()
@@ -189,63 +203,120 @@ def _get_page_box(page: pikepdf.Page, name: str):
 
 def _normalize_page_to_a4(page: pikepdf.Page):
     """
-    将页面规格统一到 A4（保持方向）。优先使用 CropBox 尺寸，处理 Rotate。
-    在页面内容外包裹缩放和平移矩阵，并设置 MediaBox/CropBox，清零 Rotate。
+    重构的A4规范化函数：更智能的方向识别和内容处理
     """
     try:
+        # 获取页面尺寸信息
         crop = _get_page_box(page, 'CropBox')
         mb = _get_page_box(page, 'MediaBox')
         box = crop or mb
+        
         if not box:
+            logger.warning("无法获取页面尺寸信息")
             return
+            
+        # 计算实际内容尺寸
         width = float(box[2] - box[0])
         height = float(box[3] - box[1])
+        
+        # 获取旋转信息
         rotate = int(page.obj.get(Name('/Rotate'), 0)) % 360
+        
+        # 智能方向判断：考虑旋转后的实际显示方向
         if rotate in (90, 270):
-            width, height = height, width
-        portrait = height >= width
-        target_w, target_h = (A4_PORTRAIT if portrait else A4_LANDSCAPE)
-        sx = target_w / width
-        sy = target_h / height
-        s = min(sx, sy)
-        new_w = width * s
-        new_h = height * s
-        tx = (target_w - new_w) / 2.0
-        ty = (target_h - new_h) / 2.0
-        # 旋转矩阵（将页面内容旋回到0度）
-        cos_sin = {
-            0: (1, 0, 0, 1),
-            90: (0, 1, -1, 0),
-            180: (-1, 0, 0, -1),
-            270: (0, -1, 1, 0)
-        }
-        a, b, c, d = cos_sin.get(rotate, (1, 0, 0, 1))
-        # 组合变换：先旋转到0，再缩放并居中
-        cm_prefix = f"q {a*s:.6f} {b*s:.6f} {c*s:.6f} {d*s:.6f} {tx:.6f} {ty:.6f} cm\n"
-        cm_suffix = "Q\n"
-        prefix_stream = pikepdf.Stream(page.obj.pdf, cm_prefix.encode('latin-1'))
-        contents = page.obj.get(Name('/Contents'))
-        if contents is None:
-            page.obj[Name('/Contents')] = page.obj.pdf.make_indirect(prefix_stream)
+            # 旋转90/270度时，交换宽高
+            display_width = height
+            display_height = width
         else:
-            if isinstance(contents, pikepdf.Array):
-                contents.insert(0, page.obj.pdf.make_indirect(prefix_stream))
+            display_width = width
+            display_height = height
+            
+        # 判断是否为纵向（高度大于宽度）
+        is_portrait = display_height > display_width
+        
+        # 选择目标A4尺寸
+        if is_portrait:
+            target_width, target_height = A4_PORTRAIT
+        else:
+            target_width, target_height = A4_LANDSCAPE
+            
+        # 计算缩放比例（保持宽高比）
+        scale_x = target_width / display_width
+        scale_y = target_height / display_height
+        scale = min(scale_x, scale_y)  # 取较小值，确保内容完全适应
+        
+        # 计算居中偏移
+        scaled_width = display_width * scale
+        scaled_height = display_height * scale
+        offset_x = (target_width - scaled_width) / 2.0
+        offset_y = (target_height - scaled_height) / 2.0
+        
+        # 构建变换矩阵
+        # 先应用旋转，再缩放，最后平移
+        if rotate == 0:
+            transform_matrix = f"q {scale:.6f} 0 0 {scale:.6f} {offset_x:.6f} {offset_y:.6f} cm\n"
+        elif rotate == 90:
+            transform_matrix = f"q 0 {scale:.6f} {-scale:.6f} 0 {target_width - offset_y:.6f} {offset_x:.6f} cm\n"
+        elif rotate == 180:
+            transform_matrix = f"q {-scale:.6f} 0 0 {-scale:.6f} {target_width - offset_x:.6f} {target_height - offset_y:.6f} cm\n"
+        elif rotate == 270:
+            transform_matrix = f"q 0 {-scale:.6f} {scale:.6f} 0 {offset_y:.6f} {target_height - offset_x:.6f} cm\n"
+        else:
+            # 其他角度，使用通用变换
+            transform_matrix = f"q {scale:.6f} 0 0 {scale:.6f} {offset_x:.6f} {offset_y:.6f} cm\n"
+            
+        # 应用变换到页面内容
+        try:
+            # 获取现有内容流
+            contents = page.obj.get(Name('/Contents'))
+            
+            # 创建新的内容流
+            new_contents = f"{transform_matrix}"
+            
+            if contents is not None:
+                # 如果有现有内容，将其包装在变换中
+                if isinstance(contents, pikepdf.Array):
+                    # 多个内容流
+                    for content in contents:
+                        new_contents += f"q\n{content.read_bytes().decode('latin-1', errors='ignore')}\nQ\n"
+                else:
+                    # 单个内容流
+                    new_contents += f"q\n{contents.read_bytes().decode('latin-1', errors='ignore')}\nQ\n"
             else:
-                page.obj[Name('/Contents')] = pikepdf.Array([page.obj.pdf.make_indirect(prefix_stream), contents])
-        suffix_stream = pikepdf.Stream(page.obj.pdf, cm_suffix.encode('latin-1'))
-        contents2 = page.obj.get(Name('/Contents'))
-        if isinstance(contents2, pikepdf.Array):
-            contents2.append(page.obj.pdf.make_indirect(suffix_stream))
-        else:
-            page.obj[Name('/Contents')] = pikepdf.Array([contents2, page.obj.pdf.make_indirect(suffix_stream)])
-        # 更新盒子尺寸与旋转
-        new_box = pikepdf.Array([0, 0, target_w, target_h])
+                # 没有内容，添加空白页面
+                new_contents += "0 0 m 0 0 l s\n"
+                
+            new_contents += "Q\n"  # 结束变换
+            
+            # 创建新的内容流对象
+            new_stream = pikepdf.Stream(page.obj.pdf, new_contents.encode('latin-1'))
+            page.obj[Name('/Contents')] = page.obj.pdf.make_indirect(new_stream)
+            
+        except Exception as content_error:
+            logger.warning(f"内容流处理失败: {content_error}")
+            # 如果内容流处理失败，至少设置尺寸
+            
+        # 更新页面尺寸
+        new_box = pikepdf.Array([0, 0, target_width, target_height])
         page.obj[Name('/MediaBox')] = new_box
         page.obj[Name('/CropBox')] = new_box
+        
+        # 清除旋转信息（因为已经通过变换矩阵处理）
         if page.obj.get(Name('/Rotate')) is not None:
             page.obj[Name('/Rotate')] = 0
+            
+        logger.info(f"页面A4规范化成功: {width:.1f}x{height:.1f} -> {target_width:.1f}x{target_height:.1f}, 旋转: {rotate}°")
+        
     except Exception as e:
-        logger.warning(f"Normalize page to A4 failed: {e}")
+        logger.warning(f"Normalize page to A4 failed: {str(e)}")
+        # 回退：至少设置A4尺寸
+        try:
+            new_box = pikepdf.Array([0, 0, A4_PORTRAIT[0], A4_PORTRAIT[1]])
+            page.obj[Name('/MediaBox')] = new_box
+            page.obj[Name('/CropBox')] = new_box
+            logger.info("已设置回退A4尺寸")
+        except Exception as fallback_error:
+            logger.error(f"回退设置也失败: {fallback_error}")
 
 def _normalize_pdf_file_to_a4(input_path: str) -> str:
     """将整份 PDF 正规化为 A4，返回临时文件路径。"""
@@ -386,6 +457,89 @@ def process_pdfs_in_batch(
             results.append({"input": item.path, "output": None, "success": False, "error": error_msg})
     
     return results
+
+def process_pdfs_in_batch_with_memory_optimization(
+    file_infos: List[PDFFileItem],
+    output_dir: str,
+    header_settings: Dict[str, Any],
+    footer_settings: Dict[str, Any],
+    signals: WorkerSignals = None,
+    chunk_size: int = 10  # 每次处理10个文件
+) -> List[Dict[str, Any]]:
+    """
+    带内存优化的大文件批处理版本
+    """
+    results = []
+    total_files = len(file_infos)
+    
+    # 分块处理文件
+    for i in range(0, total_files, chunk_size):
+        chunk = file_infos[i:i + chunk_size]
+        chunk_results = process_pdfs_in_batch(
+            chunk, output_dir, header_settings, footer_settings, signals
+        )
+        results.extend(chunk_results)
+        
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+        
+        # 报告进度
+        if signals:
+            progress = min(100, int((i + len(chunk)) / total_files * 100))
+            signals.progress.emit(progress, total_files, f"处理中... ({i + len(chunk)}/{total_files})")
+    
+    return results
+
+def _optimize_memory_for_large_pdf(input_path: str, max_memory_mb: int = 500) -> str:
+    """
+    为大PDF文件优化内存使用，必要时创建压缩版本
+    """
+    try:
+        import os
+        import fitz
+        
+        # 检查文件大小
+        file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+        
+        if file_size_mb <= max_memory_mb:
+            return input_path  # 文件不大，直接返回
+        
+        # 文件过大，创建压缩版本
+        doc = fitz.open(input_path)
+        
+        # 创建临时压缩文件
+        import tempfile
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf", prefix="docdeck_compressed_")
+        os.close(temp_fd)
+        
+        # 压缩PDF（降低分辨率，移除不必要的元数据）
+        doc.save(
+            temp_path,
+            garbage=4,  # 最大垃圾回收
+            deflate=True,  # 使用deflate压缩
+            clean=True,  # 清理元数据
+            linear=True  # 线性化PDF
+        )
+        doc.close()
+        
+        logger.info(f"大文件 {input_path} ({file_size_mb:.1f}MB) 已压缩到 {temp_path}")
+        return temp_path
+        
+    except Exception as e:
+        logger.warning(f"PDF压缩失败: {e}")
+        return input_path
+
+def _cleanup_temp_files(temp_files: List[str]):
+    """清理临时文件"""
+    import os
+    for temp_file in temp_files:
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                logger.debug(f"临时文件已清理: {temp_file}")
+        except Exception as e:
+            logger.warning(f"清理临时文件失败: {temp_file}, 错误: {e}")
 
 def merge_pdfs(input_paths: List[str], output_path: str) -> Tuple[bool, Optional[str]]:
     """使用 PikePDF 合并多个PDF，以保留书签等元数据。"""

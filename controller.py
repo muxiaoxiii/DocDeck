@@ -96,7 +96,9 @@ class ProcessingController:
     ) -> None:
         if mode == "filename":
             for item in file_items:
-                item.header_text = item.name
+                # 删除扩展名
+                name_without_ext = os.path.splitext(item.name)[0]
+                item.header_text = name_without_ext
         elif mode == "auto_number":
             for i, item in enumerate(file_items):
                 number = numbering_start + i * numbering_step

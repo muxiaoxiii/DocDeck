@@ -1,0 +1,19 @@
+2025-08-15 18:01:16,450 [INFO] DocDeck logger initialized
+2025-08-15 18:01:16,450 [INFO] Python version: 3.13.5
+2025-08-15 18:01:16,489 [INFO] Platform: macOS-26.0-arm64-arm-64bit-Mach-O
+INFO:pikepdf._core:pikepdf C++ to Python logger bridge initialized
+Traceback (most recent call last):
+  File "/Users/only/Documents/PythonProgram/DocDeck/DocDeck 2/main.py", line 103, in <module>
+    main()
+    ~~~~^^
+  File "/Users/only/Documents/PythonProgram/DocDeck/DocDeck 2/main.py", line 96, in main
+    window = MainWindow()
+  File "/Users/only/Documents/PythonProgram/DocDeck/DocDeck 2/ui_main.py", line 314, in __init__
+    self._setup_ui()
+    ~~~~~~~~~~~~~~^^
+  File "/Users/only/Documents/PythonProgram/DocDeck/DocDeck 2/ui_main.py", line 330, in _setup_ui
+    top_layout = self._create_top_bar()
+  File "/Users/only/Documents/PythonProgram/DocDeck/DocDeck 2/ui_main.py", line 375, in _create_top_bar
+    self.import_button = QPushButton(self._("Import Files or Folders"))
+                                     ^^^^^^
+AttributeError: 'MainWindow' object has no attribute '_'

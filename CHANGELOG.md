@@ -5,6 +5,30 @@ All notable changes to DocDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2025-08-15
+
+### ✨ Added
+- **增强的合并对话框**：智能排序和文件管理功能
+- **改进的A4规范化算法**：智能旋转页面处理
+- **更好的错误处理和日志记录**
+- **增强的预览系统**：页眉页脚条状可视化
+- **语言自动检测和本地化**：中英文支持
+- **智能文件管理**：合并对话框中的加减按钮
+- **确认对话框**：文件操作的安全确认
+
+### 🔧 Changed
+- **重构A4规范化**：更好的页面方向检测
+- **改进预览系统**：更好的位置计算
+- **增强模式切换逻辑**：更好的UI状态管理
+- **更新默认页眉页脚位置**：更好的可见性
+
+### 🐛 Fixed
+- **预览系统错误**：QBrush、QColor导入问题
+- **自动编号模式UI显示问题**
+- **文件名模式扩展名移除**
+- **页眉页脚位置计算**：更好的文本显示
+- **语言系统集成问题**
+
 ## [2.0.2] - 2024-12-19
 
 ### ✨ Added
