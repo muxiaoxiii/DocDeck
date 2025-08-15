@@ -215,7 +215,10 @@ class MainWindow(QMainWindow):
         checkbox_layout = QHBoxLayout()
         self.merge_checkbox = QCheckBox(_("Merge after processing"))
         self.page_number_checkbox = QCheckBox(_("Add page numbers after merge"))
+        self.normalize_a4_checkbox = QCheckBox(_("Normalize to A4 (auto)"))
+        self.normalize_a4_checkbox.setChecked(True)
         checkbox_layout.addWidget(self.merge_checkbox); checkbox_layout.addWidget(self.page_number_checkbox)
+        checkbox_layout.addWidget(self.normalize_a4_checkbox)
         checkbox_layout.addStretch()
 
         self.progress_label = QLabel(""); self.progress_label.setAlignment(Qt.AlignCenter)
@@ -240,6 +243,7 @@ class MainWindow(QMainWindow):
             "footer_x": self.footer_x_input, "footer_y": self.footer_y_input,
             "merge": self.merge_checkbox, "page_numbering": self.page_number_checkbox,
             "structured": self.structured_checkbox,
+            "normalize_a4": self.normalize_a4_checkbox,
         }
 
     def _connect_signals(self):
@@ -268,7 +272,7 @@ class MainWindow(QMainWindow):
             if isinstance(control, QLineEdit): control.textChanged.connect(self.update_header_texts)
             else: control.valueChanged.connect(self.update_header_texts)
 
-        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox]
+        preview_controls = [self.font_select, self.footer_font_select, self.font_size_spin, self.footer_font_size_spin, self.x_input, self.footer_x_input, self.structured_checkbox, self.normalize_a4_checkbox]
         for control in preview_controls:
             if isinstance(control, QComboBox): control.currentTextChanged.connect(self.update_preview)
             else:
@@ -568,10 +572,13 @@ class MainWindow(QMainWindow):
         settings = self._get_current_settings()
         header_settings = {k.replace('header_', ''): v for k, v in settings.items() if k.startswith('header_')}
         footer_settings = {k.replace('footer_', ''): v for k, v in settings.items() if k.startswith('footer_')}
-        # 传递结构化模式参数
+        # 传递结构化模式 & A4 规范化
         if settings.get('structured'):
             header_settings['structured'] = True
             footer_settings['structured'] = True
+        if settings.get('normalize_a4', True):
+            header_settings['normalize_a4'] = True
+            footer_settings['normalize_a4'] = True
 
         self.progress_label.setText(_("Processing... (0%)"))
         self.thread = QThread()
@@ -684,45 +691,61 @@ class MainWindow(QMainWindow):
         painter = QPainter(pixmap)
         settings = self._get_current_settings()
 
+        # 页面缩放：若选中行存在文件，尝试读取其第一页尺寸以更准确映射到预览
+        page_width_pt, page_height_pt = 612, 792  # 默认 Letter
+        try:
+            row = self.file_table.currentRow()
+            if row >= 0 and row < len(self.file_items):
+                from PyPDF2 import PdfReader
+                reader = PdfReader(self.file_items[row].path)
+                mb = reader.pages[0].mediabox
+                page_width_pt = int(float(mb.width))
+                page_height_pt = int(float(mb.height))
+        except Exception:
+            pass
+        # 将 pt 映射到 600px 宽度
+        width, height = 600, 80
+        scale_x = max(width / max(page_width_pt, 1), 0.05)
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.white)
+        painter = QPainter(pixmap)
+        
         # 分割线
         painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
         painter.drawLine(0, height // 2, width, height // 2)
-
+        
         # 取当前选中行的 header/footer 文本（若无选中则示例文案）
-        header_text = "Header"
-        footer_text = "Footer"
+        header_text = "Header"; footer_text = "Footer"
         current_row = self.file_table.currentRow()
         if current_row >= 0:
             try:
                 header_item = self.file_table.item(current_row, 4)
                 footer_item = self.file_table.item(current_row, 5)
-                if header_item and header_item.text():
-                    header_text = header_item.text()
-                if footer_item and footer_item.text():
-                    footer_text = footer_item.text()
+                if header_item and header_item.text(): header_text = header_item.text()
+                if footer_item and footer_item.text(): footer_text = footer_item.text()
             except Exception:
                 pass
-
+        
         # Header 在上方
         painter.setPen(QPen(Qt.black))
         header_font_name = settings.get("header_font_name", "Helvetica")
-        if not QFont(header_font_name).exactMatch():
-            header_font_name = QFont().defaultFamily()
+        if not QFont(header_font_name).exactMatch(): header_font_name = QFont().defaultFamily()
         header_font_size = max(int(settings.get("header_font_size", 9)), 8)
         painter.setFont(QFont(header_font_name, header_font_size))
-        header_x = max(int(settings.get("header_x", 72)) // 4, 10)  # 简化：将 pt 映射到小画布像素
+        header_x_pt = int(settings.get("header_x", 72))
+        header_x = max(int(header_x_pt * scale_x), 10)
         painter.drawText(header_x, height // 2 - 15, header_text[:40])
-
+        
         # Footer 在下方
         painter.setPen(QPen(Qt.darkGray))
         footer_font_name = settings.get("footer_font_name", "Helvetica")
-        if not QFont(footer_font_name).exactMatch():
-            footer_font_name = QFont().defaultFamily()
+        if not QFont(footer_font_name).exactMatch(): footer_font_name = QFont().defaultFamily()
         footer_font_size = max(int(settings.get("footer_font_size", 9)), 8)
         painter.setFont(QFont(footer_font_name, footer_font_size))
-        footer_x = max(int(settings.get("footer_x", 72)) // 4, 10)
+        footer_x_pt = int(settings.get("footer_x", 72))
+        footer_x = max(int(footer_x_pt * scale_x), 10)
         painter.drawText(footer_x, height // 2 + 25, footer_text[:40])
-
+        
         painter.end()
         self.preview_canvas.setPixmap(pixmap)
 
