@@ -101,6 +101,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/DocDeck-macOS-dmg/DocDeck-macOS-*.dmg
-            artifacts/DocDeck-Windows-zip/DocDeck-Windows-*.zip
-            artifacts/DocDeck-Linux-zip/DocDeck-Linux-*.zip 
+            artifacts/DocDeck-macOS-dmg/*.dmg
+            artifacts/DocDeck-Windows-zip/*.zip
+            artifacts/DocDeck-Linux-zip/*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true 
