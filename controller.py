@@ -8,7 +8,7 @@ from models import PDFFileItem, PDFProcessResult, EncryptionStatus
 from pdf_unlocker import unlock_pdf
 from file_namer import get_unique_filename
 from folder_importer import filter_pdf_files
-from pdf_utils import get_pdf_file_size_mb, get_pdf_page_count
+from pdf_analyzer import PdfAnalyzer
 from pdf_handler import process_pdfs_in_batch
 from logger import logger
 from font_manager import get_recommended_fonts
@@ -21,26 +21,37 @@ class ProcessingController:
 
     def handle_file_import(self, paths: List[str]) -> List[PDFFileItem]:
         pdf_paths = filter_pdf_files(paths)
+        logger.info(f"Processing {len(pdf_paths)} PDF files")
         file_items = []
         for path in pdf_paths:
             try:
+                logger.info(f"Processing file: {path}")
                 name = os.path.basename(path)
-                size = get_pdf_file_size_mb(path)
+                analyzer = PdfAnalyzer()
+                size = analyzer.get_pdf_file_size_mb(path)
+                logger.info(f"File {name}: size={size:.2f}MB")
                 
                 status = EncryptionStatus.OK
                 page_count = 0
                 try:
+                    # 使用集中式分析器获取页数
+                    page_count = analyzer.get_pdf_page_count(path)
+                    # 仍使用 PdfReader 判断加密状态
                     reader = PdfReader(path)
-                    page_count = len(reader.pages)
+                    logger.info(f"File {name}: pages={page_count}")
                     if reader.is_encrypted:
                         if not reader.decrypt(""):
                             status = EncryptionStatus.LOCKED
+                            logger.warning(f"File {name}: fully encrypted")
                         else:
                             status = EncryptionStatus.RESTRICTED
-                except PdfReadError:
+                            logger.warning(f"File {name}: restricted")
+                except PdfReadError as e:
                     status = EncryptionStatus.LOCKED
-                except Exception:
+                    logger.error(f"File {name}: PdfReadError - {e}")
+                except Exception as e:
                     status = EncryptionStatus.LOCKED
+                    logger.error(f"File {name}: unexpected error - {e}")
 
                 file_item = PDFFileItem(
                     path=path,
@@ -54,9 +65,11 @@ class ProcessingController:
                     footer_digit=3
                 )
                 file_items.append(file_item)
+                logger.info(f"Successfully created file item for: {name}")
             except Exception as e:
                 logger.error(f"Error loading file: {path} - {e}", exc_info=True)
         
+        logger.info(f"Successfully processed {len(file_items)} out of {len(pdf_paths)} files")
         if file_items:
             self._recommended_fonts = get_recommended_fonts([item.path for item in file_items])
         return file_items
@@ -74,6 +87,16 @@ class ProcessingController:
         for item in file_items:
             if item.unlocked_path and os.path.exists(item.unlocked_path):
                 item.path = item.unlocked_path
+
+        # 当存在大文件时，自动开启内存优化
+        try:
+            if any(getattr(it, 'size_mb', 0) >= 300 for it in file_items):
+                header_settings = dict(header_settings or {})
+                footer_settings = dict(footer_settings or {})
+                header_settings['memory_optimization'] = True
+                footer_settings['memory_optimization'] = True
+        except Exception:
+            pass
 
         results = process_pdfs_in_batch(
             file_infos=file_items,
@@ -113,8 +136,11 @@ class ProcessingController:
 
     def handle_unlock_pdf(self, item: PDFFileItem, password: str, output_dir: str) -> dict:
         try:
+            # 如果没有指定输出目录，使用文件所在目录
             if not output_dir or not os.path.isdir(output_dir):
-                output_dir = os.getcwd()
+                output_dir = os.path.dirname(item.path)
+                if not output_dir:
+                    output_dir = os.getcwd()
 
             base_name = os.path.splitext(item.name)[0]
             output_path = get_unique_filename(output_dir, f"{base_name}_unlocked.pdf")
@@ -187,6 +213,46 @@ class ProcessingController:
         except Exception as e:
             logger.error(f"合并PDF失败: {e}")
             raise
+
+    def remove_existing_headers_footers(self, item: PDFFileItem, output_dir: str) -> dict:
+        """删除现有页眉页脚：检测与处理分离，调用 pdf_handler 执行实际修改"""
+        try:
+            import shutil
+            # 新模块化：检测 → analyzer；处理 → handler
+            from pdf_analyzer import PdfAnalyzer
+            from pdf_handler import remove_headers_footers
+            
+            # 创建备份文件
+            backup_name = f"{os.path.splitext(item.name)[0]}_backup.pdf"
+            backup_path = os.path.join(output_dir, backup_name)
+            shutil.copy2(item.path, backup_path)
+            
+            # 检测现有页眉页脚（检测模块负责综合判断）
+            detection = PdfAnalyzer().extract_all_headers_footers(item.path, max_pages=10)
+            has_any = any(p.get('header') or p.get('footer') for p in detection.get('pages', []))
+            if not has_any:
+                return {
+                    'success': False,
+                    'error': '未检测到页眉页脚内容',
+                    'backup_path': backup_path
+                }
+            
+            # 创建输出文件
+            output_name = f"{os.path.splitext(item.name)[0]}_no_hf.pdf"
+            output_path = os.path.join(output_dir, output_name)
+            
+            # 调用处理模块执行删除（Artifact 优先，启发式遮盖回退）
+            res = remove_headers_footers(item.path, output_path, detection)
+            res['backup_path'] = backup_path
+            return res
+                
+        except Exception as e:
+            logger.error(f"Failed to remove headers/footers: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'backup_path': backup_path if 'backup_path' in locals() else None
+            }
 
 class Worker(QObject):
     

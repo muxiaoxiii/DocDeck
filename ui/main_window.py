@@ -23,9 +23,9 @@ from PySide6.QtGui import (
 
 # PDF处理相关库
 try:
-	import fitz  # PyMuPDF
+    import fitz  # PyMuPDF
 except ImportError:
-	fitz = None
+    fitz = None
 import pikepdf
 from reportlab.pdfgen import canvas as rl_canvas
 
@@ -39,14 +39,10 @@ from merge_dialog import MergeDialog
 from geometry_context import build_geometry_context
 from font_manager import register_font_safely
 from logger import logger
+from ui.components.preview_manager import PreviewManager
 
 # 导入语言管理器
 from ui.i18n.locale_manager import get_locale_manager
-from ui.components.toolbar import ToolbarManager
-from ui.components.settings_panel import SettingsPanel
-from ui.components.file_table import FileTableManager
-from ui.components.output_panel import OutputPanel
-from ui.components.preview_manager import PreviewManager
 
 class MainWindow(QMainWindow):
     """
@@ -107,15 +103,10 @@ class MainWindow(QMainWindow):
         
         # 设置现代化样式
         self._setup_modern_style()
-
-        # 组件管理器（逐步迁移，不影响现有业务逻辑）
-        self.toolbar = ToolbarManager(self)
-        self.settings_panel = SettingsPanel(self)
-        self.file_table_manager = FileTableManager(self)
-        self.output_panel = OutputPanel(self)
-        self.preview = PreviewManager(self)
         
         self._setup_ui()
+        # 预览管理器（委托所有预览渲染）
+        self.preview = PreviewManager(self)
         self._setup_menu()
         self._map_settings_to_widgets()
         self._connect_signals()
@@ -137,71 +128,22 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
 
-        # 使用组件化输出（保留原方法以便回退）
-        top_layout = self.toolbar.create_top_bar()
-        # 将 Toolbar 内部控件别名到主窗，保持既有代码可用
-        try:
-            self.import_button = self.toolbar.import_button
-            self.clear_button = self.toolbar.clear_button
-            self.unlock_button = self.toolbar.unlock_button
-            self.mode_select_combo = self.toolbar.mode_select_combo
-        except Exception:
-            pass
-
-        self.auto_number_group = self.toolbar.create_auto_number_group()
-        settings_group = self.settings_panel.create_settings_group()
-        # 将 SettingsPanel 内部控件别名到主窗，保持既有代码可用
-        try:
-            self.font_select = self.settings_panel.font_select
-            self.footer_font_select = self.settings_panel.footer_font_select
-            self.font_size_spin = self.settings_panel.font_size_spin
-            self.footer_font_size_spin = self.settings_panel.footer_font_size_spin
-            self.x_input = self.settings_panel.x_input
-            self.footer_x_input = self.settings_panel.footer_x_input
-            self.y_input = self.settings_panel.y_input
-            self.footer_y_input = self.settings_panel.footer_y_input
-            self.left_btn = self.settings_panel.left_btn
-            self.center_btn = self.settings_panel.center_btn
-            self.right_btn = self.settings_panel.right_btn
-            self.footer_left_btn = self.settings_panel.footer_left_btn
-            self.footer_center_btn = self.settings_panel.footer_center_btn
-            self.footer_right_btn = self.settings_panel.footer_right_btn
-            # 单位选择控件沿用主窗现有 self.unit_combo（上方已创建），无需覆盖
-        except Exception:
-            pass
-        table_layout = self.file_table_manager.create_table_area()
-        output_layout = self.output_panel.create_output_layout()
+        top_layout = self._create_top_bar()
+        self.auto_number_group = self._create_auto_number_group()
+        settings_group = self._create_settings_grid_group()
+        preview_group = self._create_preview_area()
+        table_layout = self._create_table_area()
+        output_layout = self._create_output_layout()
 
         main_layout.addLayout(top_layout)
         main_layout.addWidget(self.auto_number_group)
-        main_layout.addWidget(settings_group)
+        # 设置与预览并列显示
+        settings_preview_layout = QHBoxLayout()
+        settings_preview_layout.addWidget(settings_group, 3)
+        settings_preview_layout.addWidget(preview_group, 2)
+        main_layout.addLayout(settings_preview_layout)
         
-        # 单位选择和预设按钮布局
-        unit_preset_layout = QHBoxLayout()
-        
-        # 单位选择
-        unit_layout = QHBoxLayout()
-        unit_layout.addWidget(QLabel(self._("单位:")))
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["pt", "cm", "mm"])
-        self.unit_combo.setCurrentText("pt")
-        self.unit_combo.currentTextChanged.connect(self._on_unit_changed)
-        unit_layout.addWidget(self.unit_combo)
-        unit_preset_layout.addLayout(unit_layout)
-        
-        # 预设按钮
-        preset_layout = QHBoxLayout()
-        preset_layout.addWidget(QLabel(self._("预设位置:")))
-        self.top_right_btn = QPushButton(self._("右上角"))
-        self.top_right_btn.clicked.connect(self._apply_top_right_preset)
-        preset_layout.addWidget(self.top_right_btn)
-        self.bottom_right_btn = QPushButton(self._("右下角"))
-        self.bottom_right_btn.clicked.connect(self._apply_bottom_right_preset)
-        preset_layout.addWidget(self.bottom_right_btn)
-        unit_preset_layout.addLayout(preset_layout)
-        
-        unit_preset_layout.addStretch()
-        main_layout.addLayout(unit_preset_layout)
+        # 单位与预设位置控件已迁入 SettingsPanel，这里不再重复创建
         
         main_layout.addLayout(table_layout)
         main_layout.addLayout(output_layout)
@@ -209,16 +151,334 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
     def _create_top_bar(self) -> QHBoxLayout:
-        """已组件化：委托到 ToolbarManager（兼容入口）"""
-        return self.toolbar.create_top_bar()
+        """创建顶部包含导入、清空和模式选择的工具栏"""
+        layout = QHBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
+        
+        # 创建标题标签
+        title_label = QLabel("📄 " + self._("DocDeck - PDF Header & Footer Tool"))
+        title_label.setObjectName("title_label")
+        layout.addWidget(title_label)
+        
+        layout.addStretch()
+        
+        # 导入按钮组
+        import_group = QHBoxLayout()
+        import_group.setSpacing(10)
+        
+        self.import_button = QPushButton("📁 " + self._("Import Files or Folders"))
+        self.import_button.setMinimumHeight(35)
+        self.import_button.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                font-size: 13px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        
+        import_group.addWidget(self.import_button)
+        layout.addLayout(import_group)
+        
+        layout.addStretch()
+        
+        # 模式选择组
+        mode_group = QHBoxLayout()
+        mode_group.setSpacing(10)
+        
+        mode_label = QLabel(self._("Header Mode:"))
+        mode_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        
+        self.mode_select_combo = QComboBox()
+        self.mode_select_combo.addItems([self._("Filename Mode"), self._("Auto Number Mode"), self._("Custom Mode")])
+        self.mode_select_combo.setMinimumHeight(35)
+        self.mode_select_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 13px;
+                padding: 8px 15px;
+                min-width: 150px;
+            }
+        """)
+        
+        mode_group.addWidget(mode_label)
+        mode_group.addWidget(self.mode_select_combo)
+        layout.addLayout(mode_group)
+        
+        return layout
 
     def _create_auto_number_group(self) -> QGroupBox:
-        """已组件化：委托到 ToolbarManager（兼容入口）"""
-        return self.toolbar.create_auto_number_group()
+        """创建自动编号设置的控件组"""
+        group = QGroupBox("🔢 " + self._("Auto Number Settings"))
+        group.setStyleSheet("""
+            QGroupBox {
+                background-color: #ecf0f1;
+                border: 2px solid #bdc3c7;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+                color: #2c3e50;
+                background-color: #ecf0f1;
+                font-size: 14px;
+            }
+        """)
+        
+        layout = QHBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 创建标签和输入控件的网格布局
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(10)
+        
+        # 前缀设置
+        prefix_label = QLabel(self._("Prefix:"))
+        prefix_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.prefix_input = QLineEdit("Doc-")
+        self.prefix_input.setMinimumHeight(30)
+        self.prefix_input.setStyleSheet("""
+            QLineEdit {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #3498db;
+            }
+        """)
+        grid_layout.addWidget(prefix_label, 0, 0)
+        grid_layout.addWidget(self.prefix_input, 0, 1)
+        
+        # 起始编号
+        start_label = QLabel(self._("Start #:"))
+        start_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.start_spin = QSpinBox()
+        self.start_spin.setRange(1, 9999)
+        self.start_spin.setValue(1)
+        self.start_spin.setMinimumHeight(30)
+        self.start_spin.setStyleSheet("""
+            QSpinBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QSpinBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        grid_layout.addWidget(start_label, 0, 2)
+        grid_layout.addWidget(self.start_spin, 0, 3)
+        
+        # 步长
+        step_label = QLabel(self._("Step:"))
+        step_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.step_spin = QSpinBox()
+        self.step_spin.setRange(1, 100)
+        self.step_spin.setValue(1)
+        self.step_spin.setMinimumHeight(30)
+        self.step_spin.setStyleSheet("""
+            QSpinBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QSpinBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        grid_layout.addWidget(step_label, 1, 0)
+        grid_layout.addWidget(self.step_spin, 1, 1)
+        
+        # 位数
+        digits_label = QLabel(self._("Digits:"))
+        digits_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.digits_spin = QSpinBox()
+        self.digits_spin.setRange(1, 6)
+        self.digits_spin.setValue(3)
+        self.digits_spin.setMinimumHeight(30)
+        self.digits_spin.setStyleSheet("""
+            QSpinBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QSpinBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        grid_layout.addWidget(digits_label, 1, 2)
+        grid_layout.addWidget(self.digits_spin, 1, 3)
+        
+        # 后缀
+        suffix_label = QLabel(self._("Suffix:"))
+        suffix_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.suffix_input = QLineEdit("")
+        self.suffix_input.setMinimumHeight(30)
+        self.suffix_input.setStyleSheet("""
+            QLineEdit {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #3498db;
+            }
+        """)
+        grid_layout.addWidget(suffix_label, 1, 4)
+        grid_layout.addWidget(self.suffix_input, 1, 5)
+        
+        layout.addLayout(grid_layout)
+        layout.addStretch()
+        
+        group.setLayout(layout)
+        group.setVisible(False)
+        return group
 
     def _create_settings_grid_group(self) -> QGroupBox:
         """创建页眉页脚设置网格组"""
-        return self.settings_panel.create_settings_group()
+        group = QGroupBox("⚙️ " + self._("Header & Footer Settings"))
+        group.setStyleSheet("""
+            QGroupBox {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+                color: #2c3e50;
+                background-color: #f8f9fa;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        
+        grid = QGridLayout()
+        grid.setSpacing(15)
+        grid.setContentsMargins(20, 20, 20, 20)
+        
+        # 设置标签
+        settings_header = QLabel(self._("Settings"))
+        settings_header.setStyleSheet("""
+            font-weight: bold; 
+            color: #2c3e50; 
+            font-size: 13px;
+            padding: 8px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+        """)
+        settings_header.setAlignment(Qt.AlignCenter)
+        
+        header_header = QLabel(self._("Header"))
+        header_header.setStyleSheet("""
+            font-weight: bold; 
+            color: #2c3e50; 
+            font-size: 13px;
+            padding: 8px;
+            background-color: #d1ecf1;
+            border-radius: 6px;
+        """)
+        header_header.setAlignment(Qt.AlignCenter)
+        
+        footer_header = QLabel(self._("Footer"))
+        footer_header.setStyleSheet("""
+            font-weight: bold; 
+            color: #2c3e50; 
+            font-size: 13px;
+            padding: 8px;
+            background-color: #d4edda;
+            border-radius: 6px;
+        """)
+        footer_header.setAlignment(Qt.AlignCenter)
+        
+        grid.addWidget(settings_header, 0, 0)
+        grid.addWidget(header_header, 0, 1)
+        grid.addWidget(footer_header, 0, 2)
+        
+        # 字体选择
+        font_label = QLabel(self._("Font:"))
+        font_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        font_label.setAlignment(Qt.AlignRight)
+        
+        self.font_select = QComboBox()
+        self.font_select.addItems(get_system_fonts())
+        self.font_select.setMinimumHeight(30)
+        self.font_select.setStyleSheet("""
+            QComboBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        
+        self.footer_font_select = QComboBox()
+        self.footer_font_select.addItems(get_system_fonts())
+        self.footer_font_select.setMinimumHeight(30)
+        self.footer_font_select.setStyleSheet("""
+            QComboBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QComboBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        
+        grid.addWidget(font_label, 1, 0)
+        grid.addWidget(self.font_select, 1, 1)
+        grid.addWidget(self.footer_font_select, 1, 2)
+        
+        # 字体大小
+        size_label = QLabel(self._("Size:"))
+        size_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        size_label.setAlignment(Qt.AlignRight)
+        
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(6, 72)
+        self.font_size_spin.setValue(14)
+        self.font_size_spin.setMinimumHeight(30)
+        self.font_size_spin.setStyleSheet("""
+            QSpinBox {
+                border: 2px solid #bdc3c7;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QSpinBox:focus {
+                border-color: #3498db;
+            }
+        """)
+        
+        self.footer_font_size_spin = QSpinBox()
+        self.footer_font_size_spin.setRange(6, 72)
+        self.footer_font_size_spin.setValue(14)
         self.footer_font_size_spin.setMinimumHeight(30)
         self.footer_font_size_spin.setStyleSheet("""
             QSpinBox {
@@ -566,8 +826,7 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
             }
         """)
-        # 结构化模式放第二列，与中文结构化并排
-        grid.addWidget(self.structured_checkbox, 8, 1, 1, 2)
+        # 占位，具体放置见下方组合行
 
         # 结构化中文选项
         self.struct_cn_fixed_checkbox = QCheckBox("🇨🇳 " + self._("Structured CN: use fixed font"))
@@ -599,22 +858,30 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        grid.addWidget(self.struct_cn_fixed_checkbox, 9, 1, 1, 1)
-        grid.addWidget(self.struct_cn_font_combo, 9, 2, 1, 1)
+        # 并排一行显示（第9行）：结构化模式（第2列）+ 结构化中文及字体（第3列，水平并排）
+        row_idx = 9
+        grid.addWidget(self.structured_checkbox, row_idx, 1, 1, 1)
+        cn_layout = QHBoxLayout()
+        cn_layout.setSpacing(8)
+        cn_layout.addWidget(self.struct_cn_fixed_checkbox)
+        cn_layout.addWidget(self.struct_cn_font_combo)
+        grid.addLayout(cn_layout, row_idx, 2, 1, 1)
 
-        # 内存优化选项
-        self.memory_optimization_checkbox = QCheckBox(self._("Memory optimization (for large files)"))
-        self.memory_optimization_checkbox.setChecked(True)
-        self.memory_optimization_checkbox.setToolTip(self._("Enable chunked processing and memory cleanup for large PDF files"))
-        grid.addWidget(self.memory_optimization_checkbox, 10, 0, 1, 3)
+        # 删除内存优化按钮：默认策略在处理前根据文件大小自动启用
 
-        # 两列布局：设置控件 + 预览区域
-        horizontal_layout = QHBoxLayout()
-        horizontal_layout.addLayout(grid, 3) # 设置部分占3/5
+        # 仅返回设置网格组；预览区域已在主布局中并列显示
+        group.setLayout(grid)
+        return group
+
+    def _create_table_area(self) -> QHBoxLayout:
+        """创建文件列表及右侧的控制按钮"""
+        layout = QHBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        # --- 新的统一预览区域 ---
-        preview_container = QGroupBox("👁️ " + self._("WYSIWYG Preview (Header/Footer)"))
-        preview_container.setStyleSheet("""
+        # 创建表格区域组
+        table_group = QGroupBox("📋 " + self._("File List"))
+        table_group.setStyleSheet("""
             QGroupBox {
                 background-color: #f8f9fa;
                 border: 2px solid #dee2e6;
@@ -633,10 +900,270 @@ class MainWindow(QMainWindow):
             }
         """)
         
+        table_group_layout = QVBoxLayout()
+        table_group_layout.setSpacing(15)
+        table_group_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 创建表格区域
+        table_layout = QVBoxLayout()
+        table_layout.setSpacing(10)
+        
+        # 文件表格
+        self.file_table = QTableWidget(0, 6)
+        self.file_table.setHorizontalHeaderLabels([self._("No."), self._("Filename"), self._("Size (MB)"), self._("Page Count"), self._("Header Text"), self._("Footer Text")])
+        
+        # 设置表格最小宽度，确保所有列都能正常显示
+        self.file_table.setMinimumWidth(1000)  # 总宽度：80+300+100+100+200+200 = 980px + 边距
+        
+        # 设置列宽比例，优化显示效果
+        self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)      # 序号列固定宽度
+        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive) # 文件名列可调整
+        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)      # 大小列固定宽度
+        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)      # 页数列固定宽度
+        self.file_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive) # 页眉列可调整
+        self.file_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Interactive) # 页脚列可调整
+        
+        # 设置默认列宽
+        self.file_table.setColumnWidth(0, 80)   # 序号列（增加宽度显示锁图标）
+        self.file_table.setColumnWidth(1, 300)  # 文件名列（增加宽度显示完整文件名）
+        self.file_table.setColumnWidth(2, 100)  # 大小列（增加宽度显示完整大小）
+        self.file_table.setColumnWidth(3, 100)  # 页数列（增加宽度显示完整页数）
+        self.file_table.setColumnWidth(4, 200)  # 页眉列（设置合适的默认宽度）
+        self.file_table.setColumnWidth(5, 200)  # 页脚列（设置合适的默认宽度）
+        
+        # 排序功能将在表格填充完成后启用
+        # self.file_table.setSortingEnabled(True)
+        
+        self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.file_table.setEditTriggers(QTableWidget.DoubleClicked)
+        
+        # 设置表格样式表
+        self.file_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                alternate-background-color: #f8f9fa;
+                gridline-color: #e9ecef;
+                border: 2px solid #dee2e6;
+                border-radius: 8px;
+                selection-background-color: #3498db;
+                selection-color: white;
+                font-size: 11px;
+            }
+            QTableWidget::item {
+                padding: 6px 8px;
+                border-bottom: 1px solid #f1f3f4;
+            }
+            QTableWidget::item:selected {
+                background-color: #3498db;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #34495e;
+                color: white;
+                padding: 10px 8px;
+                border: none;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QHeaderView::section:hover {
+                background-color: #2c3e50;
+            }
+            QScrollBar:vertical {
+                background-color: #f1f3f4;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c1c1c1;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #a8a8a8;
+            }
+            QScrollBar:horizontal {
+                background-color: #f1f3f4;
+                height: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #c1c1c1;
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background-color: #a8a8a8;
+            }
+        """)
+        
+        # 表格编辑或选择变化时，实时刷新预览
+        self.file_table.itemChanged.connect(lambda *_: self.update_preview())
+        self.file_table.itemSelectionChanged.connect(self.update_preview)
+        
+        # 连接排序信号（禁用内置排序，使用自定义自然排序）
+        self.file_table.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_changed)
+        # 默认按照文件名自然排序一次
+        QTimer.singleShot(0, lambda: self._perform_custom_sort(1, Qt.AscendingOrder))
+        
+        # 重写排序逻辑，实现自然排序
+        self.file_table.horizontalHeader().sectionClicked.connect(self._handle_header_click)
+        
+        # 在文件表格设置后添加右键菜单
+        self._setup_context_menu()
+        
+        table_layout.addWidget(self.file_table)
+        table_group_layout.addLayout(table_layout)
+        table_group.setLayout(table_group_layout)
+        
+        # 设置表格组的最小宽度，确保表格能正常显示
+        table_group.setMinimumWidth(1100)  # 表格宽度1000px + 边距和边框
+        
+        # 创建控制按钮组
+        controls_group = QGroupBox("🎛️ " + self._("File Operations"))
+        controls_group.setStyleSheet("""
+            QGroupBox {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+                color: #2c3e50;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(10)
+        controls_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.move_up_button = QPushButton("⬆️ " + self._("Move Up"))
+        self.move_up_button.setMinimumHeight(35)
+        self.move_up_button.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+            QPushButton:pressed {
+                background-color: #495057;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
+        """)
+        
+        self.move_down_button = QPushButton("⬇️ " + self._("Move Down"))
+        self.move_down_button.setMinimumHeight(35)
+        self.move_down_button.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+            QPushButton:pressed {
+                background-color: #495057;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
+        """)
+        
+        self.remove_button = QPushButton("🗑️ " + self._("Remove"))
+        self.remove_button.setMinimumHeight(35)
+        self.remove_button.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
+        """)
+        
+        controls_layout.addStretch()
+        # 顶部不再放置的按钮：迁移到文件操作区
+        self.clear_button = QPushButton("🗑️ " + self._("Clear List"))
+        self.clear_button.setMinimumHeight(35)
+        self.clear_button.clicked.connect(self.clear_file_list)
+        self.unlock_button = QPushButton("🔓 " + self._("移除文件限制..."))
+        self.unlock_button.setMinimumHeight(35)
+        self.unlock_button.clicked.connect(self._unlock_selected)
+        controls_layout.addWidget(self.clear_button)
+        controls_layout.addWidget(self.unlock_button)
+        controls_layout.addWidget(self.move_up_button)
+        controls_layout.addWidget(self.move_down_button)
+        controls_layout.addWidget(self.remove_button)
+        controls_layout.addStretch()
+        
+        controls_group.setLayout(controls_layout)
+        
+        layout.addWidget(table_group, 10)
+        layout.addWidget(controls_group, 1)
+        return layout
+
+    def _create_preview_area(self) -> QGroupBox:
+        """创建右侧预览区域（从设置面板中拆分出来）"""
+        preview_container = QGroupBox("\U0001F441\uFE0F " + self._("WYSIWYG Preview (Header/Footer)"))
+        preview_container.setStyleSheet("""
+            QGroupBox {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+                color: #2c3e50;
+                background-color: #f8f9fa;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+
         preview_layout = QVBoxLayout()
         preview_layout.setSpacing(10)
         preview_layout.setContentsMargins(15, 15, 15, 15)
-        
+
         # 页码选择
         page_sel_layout = QHBoxLayout()
         page_label = QLabel(self._("Page: "))
@@ -646,38 +1173,193 @@ class MainWindow(QMainWindow):
         page_sel_layout.addWidget(page_label)
         page_sel_layout.addWidget(self.preview_page_spin)
         page_sel_layout.addStretch()
-        
+
         # 预览画布
         self.pdf_preview_canvas = QLabel(self._("Select a file to see preview"))
-        self.pdf_preview_canvas.setMinimumHeight(220) # 足够显示两个带状区域
+        self.pdf_preview_canvas.setMinimumHeight(220)
         self.pdf_preview_canvas.setAlignment(Qt.AlignCenter)
         self.pdf_preview_canvas.setStyleSheet("""
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f0f0f0);
             border: 2px dashed #bdc3c7; 
-                border-radius: 8px;
+            border-radius: 8px;
             padding: 5px;
-                color: #7f8c8d;
+            color: #7f8c8d;
         """)
-        
+
         preview_layout.addLayout(page_sel_layout)
-        preview_layout.addWidget(self.pdf_preview_canvas, 1) # 占据剩余空间
-        
+        preview_layout.addWidget(self.pdf_preview_canvas, 1)
+
         preview_container.setLayout(preview_layout)
-        horizontal_layout.addWidget(preview_container, 2) # 预览部分占2/5
-
-        group.setLayout(horizontal_layout)
-        return group
-
-    def _create_table_area(self) -> QHBoxLayout:
-        """创建文件列表及右侧的控制按钮"""
-        # 组件委托
-        return self.file_table_manager.create_table_area()
+        return preview_container
 
     def _create_output_layout(self) -> QVBoxLayout:
         """创建输出和执行按钮的布局"""
-        # 组件委托
-        return self.output_panel.create_output_layout()
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 创建输出组
+        output_group = QGroupBox("📂 " + self._("Output Settings"))
+        output_group.setStyleSheet("""
+            QGroupBox {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+                color: #2c3e50;
+                background-color: #f8f9fa;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        
+        output_group_layout = QVBoxLayout()
+        output_group_layout.setSpacing(15)
+        output_group_layout.setContentsMargins(20, 20, 20, 20)
+        
+        h_layout = QHBoxLayout()
+        h_layout.setSpacing(15)
+        
+        default_download_path = str(pathlib.Path.home() / "Downloads")
+        self.output_path_display = QLabel(default_download_path)
+        self.output_path_display.setStyleSheet("""
+            color: #6c757d; 
+            background-color: #e9ecef; 
+            padding: 8px 12px; 
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+        """)
+        self.output_folder = default_download_path
+        
+        output_label = QLabel(self._("Output Folder:"))
+        output_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        
+        self.select_output_button = QPushButton("📁 " + self._("Select Output Folder"))
+        self.select_output_button.setMinimumHeight(35)
+        self.select_output_button.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                border: none;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:pressed {
+                background-color: #117a8b;
+            }
+        """)
+        
+        self.start_button = QPushButton("🚀 " + self._("Start Processing"))
+        self.start_button.setObjectName("start_button")
+        self.start_button.setMinimumHeight(40)
+        self.start_button.setStyleSheet("""
+            QPushButton#start_button {
+                background-color: #27ae60;
+                border: none;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                min-width: 140px;
+            }
+            QPushButton#start_button:hover {
+                background-color: #229954;
+            }
+            QPushButton#start_button:pressed {
+                background-color: #1e8449;
+            }
+            QPushButton#start_button:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
+        """)
 
+        h_layout.addWidget(output_label)
+        h_layout.addWidget(self.output_path_display, 1)
+        h_layout.addWidget(self.select_output_button)
+        h_layout.addWidget(self.start_button)
+        
+        output_group_layout.addLayout(h_layout)
+        
+        # 复选框布局
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setSpacing(20)
+        
+        self.merge_checkbox = QCheckBox("🔗 " + self._("Merge after processing"))
+        self.merge_checkbox.setStyleSheet("""
+            QCheckBox {
+                font-weight: bold;
+                color: #2c3e50;
+                font-size: 12px;
+                padding: 8px;
+                background-color: #e8f4fd;
+                border-radius: 6px;
+            }
+        """)
+        
+        self.page_number_checkbox = QCheckBox("🔢 " + self._("Add page numbers after merge"))
+        self.page_number_checkbox.setStyleSheet("""
+            QCheckBox {
+                font-weight: bold;
+                color: #2c3e50;
+                font-size: 12px;
+                padding: 8px;
+                background-color: #e8f4fd;
+                border-radius: 6px;
+            }
+        """)
+        
+        self.normalize_a4_checkbox = QCheckBox("📏 " + self._("Normalize to A4 (auto)"))
+        self.normalize_a4_checkbox.setChecked(True)
+        self.normalize_a4_checkbox.setStyleSheet("""
+            QCheckBox {
+                font-weight: bold;
+                color: #2c3e50;
+                font-size: 12px;
+                padding: 8px;
+                background-color: #e8f4fd;
+                border-radius: 6px;
+            }
+        """)
+        
+        checkbox_layout.addWidget(self.merge_checkbox)
+        checkbox_layout.addWidget(self.page_number_checkbox)
+        checkbox_layout.addWidget(self.normalize_a4_checkbox)
+        checkbox_layout.addStretch()
+
+        output_group_layout.addLayout(checkbox_layout)
+        output_group.setLayout(output_group_layout)
+        
+        # 进度标签
+        self.progress_label = QLabel("")
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        self.progress_label.setStyleSheet("""
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 13px;
+            padding: 10px;
+            background-color: #d4edda;
+            border-radius: 6px;
+            border: 1px solid #c3e6cb;
+        """)
+
+        layout.addWidget(output_group)
+        layout.addWidget(self.progress_label)
+        return layout
+    
     def _create_warning_label(self) -> QLabel:
         label = QLabel("⚠️"); label.setToolTip(self._("This position is too close to the edge...")); label.setVisible(False)
         return label
@@ -740,22 +1422,6 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         """使用循环和映射来连接信号与槽，减少重复代码"""
-        # 组件信号 → 主窗槽
-        try:
-            # Toolbar
-            self.toolbar.import_requested.connect(self.import_files)
-            self.toolbar.clear_requested.connect(self.clear_file_list)
-            self.toolbar.unlock_requested.connect(self._unlock_selected)
-            self.toolbar.mode_changed.connect(lambda _: self.header_mode_changed(self.mode_select_combo.currentIndex()))
-            self.toolbar.auto_number_changed.connect(lambda _: self.update_header_texts())
-        except Exception:
-            pass
-
-        try:
-            # Settings 面板变更统一触发预览更新（细分信号已在内部发出）
-            self.settings_panel.settings_changed.connect(lambda _s: self.update_preview())
-        except Exception:
-            pass
         button_slots = {
             self.import_button: self.import_files, self.clear_button: self.clear_file_list,
             self.move_up_button: self.move_item_up, self.move_down_button: self.move_item_down,
@@ -1149,9 +1815,9 @@ class MainWindow(QMainWindow):
         if settings.get('normalize_a4', True):
             header_settings['normalize_a4'] = True
             footer_settings['normalize_a4'] = True
-            if settings.get('memory_optimization'):
-                header_settings['memory_optimization'] = True
-                footer_settings['memory_optimization'] = True
+        if settings.get('memory_optimization'):
+            header_settings['memory_optimization'] = True
+            footer_settings['memory_optimization'] = True
 
         self.progress_label.setText(self._("Processing... (0%)"))
         self.thread = QThread()
@@ -1271,7 +1937,6 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'preview') and self.preview:
                 self.preview.update_preview()
         except Exception:
-            # 保底避免预览异常影响主流程
             pass
     
     def update_position_preview(self):
@@ -1287,28 +1952,116 @@ class MainWindow(QMainWindow):
         pass
 
     def _render_text_overlay_for_preview(self, text: str, font_name: str, font_size: int, page_width: float, page_height: float, x: float, y: float) -> Optional[QPixmap]:
-        """已由 PreviewManager 接管，保留占位。"""
-        return None
-    
+        """
+        使用 ReportLab 在内存中生成仅包含文本的、透明背景的 PDF，并将其渲染为 QPixmap。
+        """
+        try:
+            packet = BytesIO()
+            # 创建与PDF页面完全相同尺寸的画布
+            can = rl_canvas.Canvas(packet, pagesize=(page_width, page_height))
+            
+            # 确保字体已注册
+            actual_font = font_name
+            if not register_font_safely(font_name):
+                suggested = suggest_chinese_fallback_font(font_name)
+                if suggested and register_font_safely(suggested):
+                    actual_font = suggested
+                else:
+                    logger.warning(f"[Preview] 无法注册字体 '{font_name}'，回退到 Helvetica。")
+                    actual_font = "Helvetica" # ReportLab 内置
+            
+            can.setFont(actual_font, font_size)
+            can.drawString(x, y, text)
+            can.save()
+            
+            packet.seek(0)
+            
+            # 使用 PyMuPDF 渲染这个 overlay PDF
+            overlay_doc = fitz.open("pdf", packet.read())
+            pix = overlay_doc[0].get_pixmap(alpha=True) # 必须使用 alpha=True
+            image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGBA8888)
+            return QPixmap.fromImage(image)
+
+        except Exception as e:
+            logger.error(f"渲染预览文本覆盖层失败: {e}", exc_info=True)
+            return None
+
     def update_pdf_content_preview(self):
-        """委托到 PreviewManager 进行预览渲染"""
+        """委托到 PreviewManager 渲染预览"""
         try:
             if hasattr(self, 'preview') and self.preview:
                 return self.preview.update_pdf_content_preview()
         except Exception:
             pass
-        return
-    
+
     def _draw_simulated_preview(self, painter: QPainter, settings: dict, header_text: str, footer_text: str):
-        """委托到 PreviewManager 的占位兼容方法（不再在此实现）。"""
-        pass
+        """绘制模拟预览（当无法加载真实PDF内容时）"""
+        # 绘制页面背景（模拟A4页面）
+        page_width = 595  # A4宽度 (pt)
+        page_height = 842  # A4高度 (pt)
+        scale = min(350 / page_width, 250 / page_height)
+        
+        scaled_width = int(page_width * scale)
+        scaled_height = int(page_height * scale)
+        start_x = (400 - scaled_width) // 2
+        start_y = (300 - scaled_height) // 2
+        
+        # 绘制页面边框
+        painter.setPen(QPen(Qt.black, 1))
+        painter.drawRect(start_x, start_y, scaled_width, scaled_height)
+        
+        # 绘制页眉文本
+        if header_text:
+            painter.setPen(Qt.blue)
+            font_size = int(settings.get("header_font_size", 14) * scale)
+            painter.setFont(QFont(settings.get("header_font", "Arial"), font_size))
+            
+            header_x = start_x + int(settings.get("header_x", 72) * scale)
+            header_y = start_y + int(settings.get("header_y", 752) * scale)
+            
+            text_width = painter.fontMetrics().horizontalAdvance(header_text[:50])
+            if settings.get("header_alignment", "left") == "right":
+                header_x = start_x + scaled_width - text_width - 20
+            elif settings.get("header_alignment", "left") == "center":
+                header_x = start_x + (scaled_width - text_width) // 2
+            
+            painter.drawText(header_x, header_y, header_text[:50])
+        
+        # 绘制页脚文本
+        if footer_text:
+            painter.setPen(Qt.red)
+            font_size = int(settings.get("footer_font_size", 14) * scale)
+            painter.setFont(QFont(settings.get("footer_font", "Arial"), font_size))
+            
+            footer_x = start_x + int(settings.get("footer_x", 72) * scale)
+            footer_y = start_y + int(settings.get("footer_y", 40) * scale)
+            
+            text_width = painter.fontMetrics().horizontalAdvance(footer_text[:50])
+            if settings.get("footer_alignment", "left") == "right":
+                footer_x = start_x + scaled_width - text_width - 20
+            elif settings.get("footer_alignment", "left") == "center":
+                footer_x = start_x + (scaled_width - text_width) // 2
+            
+            painter.drawText(footer_x, footer_y, footer_text[:50])
     
     def _get_current_header_text(self) -> str:
-        """已由 PreviewManager 接管，保留占位。"""
+        """获取当前页眉文本"""
+        row = self.file_table.currentRow()
+        if row >= 0 and row < len(self.file_items):
+            if self.file_table.item(row, 4):
+                return self.file_table.item(row, 4).text()
+            elif hasattr(self.file_items[row], 'header_text'):
+                return self.file_items[row].header_text or ""
         return ""
     
     def _get_current_footer_text(self) -> str:
-        """已由 PreviewManager 接管，保留占位。"""
+        """获取当前页脚文本"""
+        row = self.file_table.currentRow()
+        if row >= 0 and row < len(self.file_items):
+            if self.file_table.item(row, 5):
+                return self.file_table.item(row, 5).text()
+            elif hasattr(self.file_items[row], 'footer_text'):
+                return self.file_items[row].footer_text or ""
         return ""
 
     def _validate_positions(self):
@@ -1439,7 +2192,7 @@ class MainWindow(QMainWindow):
         if data_index < 0 or data_index >= len(self.file_items):
             logger.warning(f"Invalid row: {view_row}, file_items count: {len(self.file_items)}")
             return
-            
+        
         menu = QMenu(self)
         
         # 检查文件是否被加密或限制
@@ -1512,17 +2265,50 @@ class MainWindow(QMainWindow):
         menu.exec_(self.file_table.mapToGlobal(position))
 
     def _edit_headers_footers(self, row: int):
-        """编辑页眉页脚（弹出编辑对话框）"""
+        """编辑页眉页脚"""
         if row >= 0 and row < len(self.file_items):
             try:
-                from ui.dialogs import HeaderFooterEditDialog
-                if HeaderFooterEditDialog is None:
-                    raise RuntimeError("HeaderFooterEditDialog not available")
-                dlg = HeaderFooterEditDialog(self, row, self)
-                dlg.exec()
-                # 对话框内部已负责回写文本、位置和预览刷新
-                # 表格如需更新，统一调用
-                self._populate_table_from_items()
+                item = self.file_items[row]
+                
+                # 获取当前设置
+                current_header = getattr(item, 'header_text', '')
+                current_footer = getattr(item, 'footer_text', '')
+                
+                # 创建编辑对话框
+                from PySide6.QtWidgets import QInputDialog, QLineEdit
+                
+                # 编辑页眉
+                header_text, ok1 = QInputDialog.getText(
+                    self, 
+                    self._("编辑页眉"), 
+                    self._("请输入页眉文本:"),
+                    QLineEdit.Normal,
+                    current_header
+                )
+                
+                if ok1:
+                    # 编辑页脚
+                    footer_text, ok2 = QInputDialog.getText(
+                        self, 
+                        self._("编辑页脚"), 
+                        self._("请输入页脚文本:"),
+                        QLineEdit.Normal,
+                        current_footer
+                    )
+                    
+                    if ok2:
+                        # 更新文件项
+                        item.header_text = header_text
+                        item.footer_text = footer_text
+                        
+                        # 刷新表格显示
+                        self._populate_table_from_items()
+                        
+                        QMessageBox.information(self, self._("编辑成功"), 
+                            f"{self._('页眉页脚编辑成功！')}\n\n"
+                            f"{self._('页眉')}: {header_text or '-'}\n"
+                            f"{self._('页脚')}: {footer_text or '-'}")
+                        
             except Exception as e:
                 QMessageBox.warning(self, self._("编辑失败"), f"{self._('编辑页眉页脚失败')}: {str(e)}")
 
@@ -1531,7 +2317,7 @@ class MainWindow(QMainWindow):
         if row >= 0 and row < len(self.file_items):
             try:
                 item = self.file_items[row]
-            
+                
                 # 确认操作
                 reply = QMessageBox.question(
                     self, 
@@ -1545,7 +2331,7 @@ class MainWindow(QMainWindow):
                     if not self.output_folder:
                         QMessageBox.warning(self, self._("请先选择输出文件夹"), self._("删除页眉页脚需要先选择输出文件夹"))
                         return
-                
+                    
                     # 调用控制器处理
                     result = self.controller.remove_existing_headers_footers(item, self.output_folder)
                     
@@ -1614,7 +2400,7 @@ class MainWindow(QMainWindow):
                     else:
                         # 受限：询问是否尝试自动解锁
                         reply = QMessageBox.question(
-                            self, 
+                            self,
                             self._("Restricted PDF"),
                             self._("This PDF is restricted and cannot be modified.\nDo you want to attempt automatic unlocking?"),
                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No

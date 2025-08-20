@@ -34,6 +34,7 @@ class MergeDialog(QDialog):
             item = QListWidgetItem(os.path.basename(path))
             item.setToolTip(path)  # 显示完整路径
             item.setData(Qt.UserRole, path)  # 保存完整路径
+            self.list_widget.addItem(item)
         self.list_widget.itemDoubleClicked.connect(self.remove_item)
         layout.addWidget(self.list_widget)
 

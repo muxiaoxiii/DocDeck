@@ -24,3 +24,9 @@ env/
 # Icon & installer 临时输出
 *.icns
 *.ico
+
+# Analysis reports
+report*.json
+report.json
+report1nohf.json
+report2.json

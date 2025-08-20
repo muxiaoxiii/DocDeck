@@ -5,6 +5,33 @@ All notable changes to DocDeck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-08-20
+
+### ✨ Added
+- 集中式分析模块 `pdf_analyzer.PdfAnalyzer`：提供页数/大小/Metadata/字体扫描；页眉/页脚 Artifact + 启发式检测；输出结构化报告（含 `has_structured_header/footer` 与候选列表）。
+- 删除页眉/页脚：`pdf_handler.remove_headers_footers` 优先精确删除 `/Artifact /Subtype /Header|/Footer`，无结构化时回退遮盖策略。
+- 自动内存优化：当输入文件 ≥ 300MB 时自动启用。
+
+### 🔧 Changed
+- 预览逻辑集中至 `ui/components/preview_manager.py`（PyMuPDF 底图 + ReportLab 文本层叠加）。
+- 设置面板三列比 1:2:2；“结构化模式/中文固定字体/字体选择”并列一行。
+- “清空列表/移除文件限制”移动至右侧 File Operations。
+- 右键菜单增加“编辑页眉页脚”“删除原页眉页脚”。
+- 国际化文案集中到 `ui/i18n/translations.py`。
+
+### 🧹 Refactor
+- `controller` 仅负责编排：检测→`PdfAnalyzer`，删除→`pdf_handler`。
+- `pdf_utils` 改为兼容层（检测迁移至 `PdfAnalyzer`）；`register_font_safely` 迁至 `font_manager`。
+- 删除备份代码与冗余文档，内容合并进 README/TODO。
+
+### 📚 Docs
+- README 合并规划与架构说明，明确 `pdf_analyzer` 为唯一检测入口；`pdf_utils` 为过渡兼容层。
+- TODO 补充“重复模块与重构任务”。
+
+### 🧰 Chore
+- `.gitignore` 忽略分析报告：`report*.json`、`report.json`、`report1nohf.json`、`report2.json`。
+- 版本号更新为 2.2.0；创建标签 `v2.2.0`。
+
 ## [2.1.0] - 2025-08-15
 
 ### ✨ Added

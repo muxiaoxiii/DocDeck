@@ -3,7 +3,7 @@ import sys
 import os
 import argparse
 from PySide6.QtWidgets import QApplication
-from ui_main import MainWindow
+from ui import MainWindow
 from logger import logger
 from controller import ProcessingController
 from models import PDFFileItem

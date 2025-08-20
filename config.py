@@ -12,7 +12,9 @@ DEFAULT_FONT_NAME = "Helvetica"
 DEFAULT_FONT_SIZE = 9
 
 # === Header/Footer Placement ===
+DEFAULT_HEADER_X = 72   # Left margin
 DEFAULT_HEADER_Y = 752  # 792 - 40pt
+DEFAULT_FOOTER_X = 72   # Left margin
 DEFAULT_FOOTER_Y = 40
 PAGE_HEIGHT_PT = 792  # Letter size
 PAGE_WIDTH_PT = 612   # Letter size

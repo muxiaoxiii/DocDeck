@@ -24,6 +24,9 @@ class PDFFileItem:
     footer_digit: int = 1         # 页脚编号位数（例如 1 表示不补零，2 表示01、02）
     encryption_status: EncryptionStatus = EncryptionStatus.OK
     unlocked_path: Optional[str] = None  # Path to decrypted version, if available
+    has_structured_header: bool = False  # 是否检测到结构化Header
+    has_structured_footer: bool = False  # 是否检测到结构化Footer
+    preview_mode: str = "keep"          # per-file 预览/处理模式: keep|replace|remove
 
 @dataclass
 class PDFProcessResult:

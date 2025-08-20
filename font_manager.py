@@ -9,6 +9,35 @@ try:
 except ImportError:
     raise ImportError("The 'fitz' module is missing. Please install it via 'pip install pymupdf'")
 
+# ReportLab 字体注册（迁移自 pdf_utils）
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from matplotlib.font_manager import findfont, FontProperties
+
+def register_font_safely(font_name: str) -> bool:
+    """
+    安全注册系统字体到 ReportLab 环境。
+
+    Returns:
+        bool: True 表示注册成功或已注册；False 表示未找到或失败。
+    """
+    if font_name in pdfmetrics.getRegisteredFontNames():
+        logger.debug(f"[Font] '{font_name}' already registered.")
+        return True
+    try:
+        font_prop = FontProperties(family=font_name)
+        font_path = findfont(font_prop, fallback_to_default=True)
+        if font_path:
+            pdfmetrics.registerFont(TTFont(font_name, font_path))
+            logger.info(f"[Font] Registered '{font_name}' from: {font_path}")
+            return True
+        else:
+            logger.warning(f"[Font] Could not find path for font: {font_name}")
+            return False
+    except Exception as e:
+        logger.warning(f"[Font] Failed to register font '{font_name}': {e}")
+        return False
+
 def get_system_fonts() -> List[str]:
     """
     Return a list of available system font family names.
