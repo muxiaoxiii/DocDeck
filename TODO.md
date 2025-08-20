@@ -61,12 +61,12 @@
 - [ ] 清理重复与备份代码：
   - 删除：`ui_main_backup.py`、`ui_main_backup2.py`、`ui_main_backup3.py`、`ui_main_preview_backup.py`、`ui_main.py.backup*`
   - 删除：多余 Markdown 文档（已合并进 README/TODO）
-- [ ] 业务检测统一改造：
-  - 所有调用点改为直接使用 `pdf_analyzer.PdfAnalyzer`（目前 controller 与编辑对话框已完成）
-  - 在 `pdf_utils` 标注检测函数弃用，保留为兼容层，后续移除
-- [ ] 删除功能模块重复：
-  - `pdf_utils` 与 `pdf_analyzer` 均提供检测功能 → 以 `pdf_analyzer` 为准，`pdf_utils` 仅保留字体注册等通用工具
-  - `controller` 中删除逻辑已转由 `pdf_handler.remove_headers_footers` 执行，确保不直接改写内容流
+- [x] 业务检测统一改造：
+  - 所有调用点改为直接使用 `pdf_analyzer.PdfAnalyzer`（controller 与编辑对话框已完成）
+  - 移除 `pdf_utils` 兼容层文件
+- [x] 删除功能模块重复：
+  - 移除 `pdf_utils`（检测已迁移至 `pdf_analyzer`；字体注册迁至 `font_manager`）
+  - `controller` 中删除逻辑已由 `pdf_handler.remove_headers_footers` 执行，确保不直接改写内容流
 
 ### 中优先级
 - [ ] 6. Type0/ToUnicode 子集化优化

@@ -92,7 +92,6 @@ DocDeck/
 ├── controller.py           # 业务逻辑控制器
 ├── pdf_handler.py          # PDF处理核心（结构化写入、A4规范化等）
 ├── pdf_analyzer.py         # PDF分析（页数/大小/元数据/字体/Artifact+启发式检测/报告）
-├── pdf_utils.py            # 兼容层（仅少量通用工具；检测已迁移至 pdf_analyzer）
 ├── font_manager.py         # 字体管理（中文回退、检测）
 ├── type0_font_provider.py  # Type0字体载体注入（含ToUnicode）
 ├── geometry_context.py     # 几何坐标与A4规范化
