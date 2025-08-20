@@ -29,9 +29,41 @@ jobs:
         run: |
           python -m compileall -q -x "venv|logs" .
 
+  build-macos:
+    runs-on: macos-latest
+    needs: build-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+
+      - name: Run build script (macOS)
+        if: hashFiles('build-mac.sh') != ''
+        run: |
+          chmod +x build-mac.sh || true
+          ./build-mac.sh || bash build-mac.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-macos
+          path: |
+            dist/**
+            build/**
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-test
+    needs: [build-test, build-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
